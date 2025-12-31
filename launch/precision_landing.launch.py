@@ -3,7 +3,7 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     return LaunchDescription([
-        # # USB相機節點
+        # USB camera node (landing cam)
         Node(
             package='usb_cam',
             executable='usb_cam_node_exe',
@@ -26,9 +26,9 @@ def generate_launch_description():
         # ArUco多標記識別節點
         Node(
             package='aruco_ros',
-            executable='marker_publisher',  # 多標記版本
+            executable='marker_publisher', 
             parameters=[{
-                'marker_size': 0.10,  # 10公分
+                'marker_size': 0.09,  # 9 cm
                 'reference_frame': 'camera',
                 'camera_frame': 'camera',
             }],
