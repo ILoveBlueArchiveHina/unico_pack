@@ -3,7 +3,6 @@
 import rclpy
 import time
 from rclpy.node import Node
-from ros_gz_interfaces.msg import Altimeter
 from geometry_msgs.msg import PoseStamped, Twist, TransformStamped
 from sensor_msgs.msg import NavSatFix
 from mavros_msgs.msg import State
@@ -79,7 +78,7 @@ class MultiMarkerLanding(Node):
         # 對齊檢查參數
         self.ALIGNMENT_THRESHOLD_XY = 0.05  # 水平偏差閾值 (m)
         self.ALIGNMENT_THRESHOLD_YAW = 2.0  # Yaw 角度偏差閾值 (度)
-        self.ALIGNMENT_HOLD_TIME = 10.0     # 對齊保持時間 (秒)
+        self.ALIGNMENT_HOLD_TIME = 5.0     # 對齊保持時間 (秒)
         self.current_time = 0.0             # 對齊時間初始化
         self.aligned_time = None            # 開始對齊的時間
         self.is_aligned = False             # 對齐狀態標記
@@ -419,7 +418,7 @@ class MultiMarkerLanding(Node):
         vel_cmd.angular.z = float(np.clip(vel_cmd.angular.z, -max_ang_z, max_ang_z))
         
         # 發布速度指令
-        if not self.is_aligned:
+        if not self.is_aligned or not self.land_mode_called:
             self.vel_pub.publish(vel_cmd)
 
         # 判斷降落成功
