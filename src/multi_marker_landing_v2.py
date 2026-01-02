@@ -77,11 +77,12 @@ class MultiMarkerLanding(Node):
         
         # 對齊檢查參數
         self.ALIGNMENT_THRESHOLD_XY = 0.05  # 水平偏差閾值 (m)
-        self.ALIGNMENT_THRESHOLD_YAW = 3.0  # Yaw 角度偏差閾值 (度)
-        self.ALIGNMENT_HOLD_TIME = 1.0     # 對齊保持時間 (秒)
+        self.ALIGNMENT_THRESHOLD_YAW = 2.0  # Yaw 角度偏差閾值 (度)
+        self.ALIGNMENT_HOLD_TIME = 2.0     # 對齊保持時間 (秒)
         self.current_time = 0.0             # 對齊時間初始化
         self.aligned_time = None            # 開始對齊的時間
         self.is_aligned = False             # 對齐狀態標記
+        self.aligned_done = False
         self.last_alignment_log = False     # 對齐 log 標記
         
         # 控制迴圈 10Hz
@@ -288,11 +289,11 @@ class MultiMarkerLanding(Node):
             
             # 檢查是否持續對齊足夠時間
             if current_time - self.aligned_time >= self.ALIGNMENT_HOLD_TIME:
+                self.aligned_done = True
                 return True
         else:
             # 未對齊，重置時間
             self.aligned_time = None
-            self.is_aligned = False
         return False
 
     def control_loop(self):
@@ -305,7 +306,6 @@ class MultiMarkerLanding(Node):
                 self.get_logger().warn('No valid landing center, hovering...')
                 self.last_no_center = True
             self.last_final_descent = False
-            self.is_aligned = False
             return
         else:
             self.last_no_center = False
@@ -336,13 +336,15 @@ class MultiMarkerLanding(Node):
 
         # self.current_time += 0.1
         
-        # 如果對齊成功且尚未呼叫 LAND 模式，則呼叫
-        if self.is_aligned and not self.land_mode_called:
-            self.vel_pub.publish(Twist())
-            self.call_land_mode()
+        
+            
         
         # 創建速度控制指令 (使用 Twist)
         vel_cmd = Twist()
+
+        # 如果對齊成功且尚未呼叫 LAND 模式，則呼叫
+        if self.aligned_done:
+            vel_cmd.linear.z = -0.1
 
         # 計算水平方向誤差修正速度
         vel_cmd.linear.x = -self.Kp_xy * center['x']
@@ -418,8 +420,7 @@ class MultiMarkerLanding(Node):
         vel_cmd.angular.z = float(np.clip(vel_cmd.angular.z, -max_ang_z, max_ang_z))
         
         # 發布速度指令
-        if not self.is_aligned or not self.land_mode_called:
-            self.vel_pub.publish(vel_cmd)
+        self.vel_pub.publish(vel_cmd)
 
         # 判斷降落成功
         # if self.current_altitude < 0.02:

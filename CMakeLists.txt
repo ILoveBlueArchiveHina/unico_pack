@@ -21,6 +21,7 @@ install(
   src/cmd_vel_bridge.py
   src/cargo_tracker.py
   src/multi_marker_landing.py
+  src/multi_marker_landing_v2.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
