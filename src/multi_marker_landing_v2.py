@@ -78,7 +78,7 @@ class MultiMarkerLanding(Node):
         # 對齊檢查參數
         self.ALIGNMENT_THRESHOLD_XY = 0.05  # 水平偏差閾值 (m)
         self.ALIGNMENT_THRESHOLD_YAW = 2.0  # Yaw 角度偏差閾值 (度)
-        self.ALIGNMENT_HOLD_TIME = 2.0     # 對齊保持時間 (秒)
+        self.ALIGNMENT_HOLD_TIME = 0.5     # 對齊保持時間 (秒)
         self.current_time = 0.0             # 對齊時間初始化
         self.aligned_time = None            # 開始對齊的時間
         self.is_aligned = False             # 對齐狀態標記
@@ -344,7 +344,7 @@ class MultiMarkerLanding(Node):
 
         # 如果對齊成功且尚未呼叫 LAND 模式，則呼叫
         if self.aligned_done:
-            vel_cmd.linear.z = -0.1
+            vel_cmd.linear.z = self.DESCENT_SPEED
 
         # 計算水平方向誤差修正速度
         vel_cmd.linear.x = -self.Kp_xy * center['x']
