@@ -43,4 +43,10 @@ def generate_launch_description():
             package='unico_pack',
             executable='multi_marker_landing_v3.py',
         ),
+        # 多標記降落控制節點
+        Node(
+            package='unico_pack',
+            executable='cmd_vel_bridge.py',
+        ),
     ])
+    

@@ -70,19 +70,19 @@ class MultiMarkerLanding(Node):
         self.MARKER_IDS = [0, 1, 2, 3]  # 外圈4個標記ID
         self.INNER_MARKER_IDS = [100, 200, 300, 400]  # 內圈4個標記ID
         self.MARKER_SIZE = 0.10  # 10公分
-        self.MIN_MARKERS_REQUIRED = 4  # 至少要看到3個標記
+        self.MIN_MARKERS_REQUIRED = 3  # 至少要看到3個標記
         self.LANDING_ALTITUDE_THRESHOLD = 0.3  # 30公分內開始最終降落
         self.DESCENT_SPEED = -0.1  # 下降速度 m/s
         
         # 控制增益
-        self.Kp_xy = 0.2  # 水平控制增益
-        self.Kp_z = 0.2   # 垂直控制增益
+        self.Kp_xy = 0.18  # 水平控制增益
+        self.Kp_z = 0.18   # 垂直控制增益
         self.Kp_yaw = 0.005  # Yaw 角速度控制增益
         
         # 對齊檢查參數
-        self.ALIGNMENT_THRESHOLD_XY = 0.08  # 水平偏差閾值 (m)
-        self.ALIGNMENT_THRESHOLD_YAW = 2.0  # Yaw 角度偏差閾值 (度)
-        self.ALIGNMENT_HOLD_TIME = 0.5     # 對齊保持時間 (秒)
+        self.ALIGNMENT_THRESHOLD_XY = 0.05  # 水平偏差閾值 (m)
+        self.ALIGNMENT_THRESHOLD_YAW = 1.0  # Yaw 角度偏差閾值 (度)
+        self.ALIGNMENT_HOLD_TIME = 0.2     # 對齊保持時間 (秒)
         self.current_time = 0.0             # 對齊時間初始化
         self.aligned_time = None            # 開始對齊的時間
         self.is_aligned = False             # 對齐狀態標記
