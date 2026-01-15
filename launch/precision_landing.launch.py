@@ -28,7 +28,7 @@ def generate_launch_description():
             package='aruco_ros',
             executable='marker_publisher', 
             parameters=[{
-                'marker_size': 0.09,  # cm
+                'marker_size': 0.03,  # cm
                 'reference_frame': 'camera',
                 'camera_frame': 'camera',
             }],
@@ -39,10 +39,10 @@ def generate_launch_description():
         ),
         
         # 多標記降落控制節點
-        Node(
-            package='unico_pack',
-            executable='multi_marker_landing_v3.py',
-        ),
+        # Node(
+        #     package='unico_pack',
+        #     executable='multi_marker_landing_v3.py',
+        # ),
         # 多標記降落控制節點
         Node(
             package='unico_pack',

@@ -85,7 +85,7 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'use_sim_time': use_sim_time,
-                'yaml_filename': '/home/uni_co/ros2_ws/src/drone_in_warehouse/maps/empty_warehouse.yaml'
+                'yaml_filename': '"/home/uni-co-jetson/ros2_ws/src/unico_pack/maps/map_v1_20251203/my_map120302.yaml"'
             }]
         ),
 

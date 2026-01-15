@@ -67,12 +67,12 @@ class MultiMarkerLanding(Node):
         self.landing_complete = False  # 降落完成標記
         
         # 降落參數
-        self.MARKER_IDS = [0, 1, 2, 3]  # 外圈4個標記ID
+        self.MARKER_IDS = [10, 20, 30, 40]  # 外圈4個標記ID
         self.INNER_MARKER_IDS = [100, 200, 300, 400]  # 內圈4個標記ID
         self.MARKER_SIZE = 0.10  # 10公分
         self.MIN_MARKERS_REQUIRED = 3  # 至少要看到3個標記
         self.LANDING_ALTITUDE_THRESHOLD = 0.3  # 30公分內開始最終降落
-        self.DESCENT_SPEED = -0.1  # 下降速度 m/s
+        self.DESCENT_SPEED = -0.05  # 下降速度 m/s
         
         # 控制增益
         self.Kp_xy = 0.2  # 水平控制增益
@@ -419,9 +419,9 @@ class MultiMarkerLanding(Node):
         #         self.last_final_descent = True
 
         # 速度限制
-        max_vel_xy = 0.2
-        max_vel_z = 0.2
-        max_ang_z = 0.1  # 最大角速度 rad/s
+        max_vel_xy = 0.1
+        max_vel_z = 0.1
+        max_ang_z = 0.05  # 最大角速度 rad/s
 
         # 防護 NaN/inf
         for axis in ('x', 'y', 'z'):
