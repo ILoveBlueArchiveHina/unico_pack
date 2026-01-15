@@ -51,9 +51,9 @@ class MultiMarkerLanding(Node):
         # TF 廣播器 (為 marker 發佈 transform)
         self.tf_broadcaster = TransformBroadcaster(self)
         
-        # MAVROS set_mode service client
-        self.set_mode_client = self.create_client(SetMode, '/mavros/set_mode')
-        self.land_mode_called = False  # 追蹤是否已呼叫 LAND 模式
+        # MAVROS arming service client
+        self.arming_client = self.create_client(CommandBool, '/mavros/cmd/arming')
+        self.disarm_called = False  # 追蹤是否已呼叫上鎖命令
         
         # 系統狀態
         self.detected_markers = {}  # 儲存偵測到的外圈標記 {id: position}
@@ -75,14 +75,14 @@ class MultiMarkerLanding(Node):
         self.DESCENT_SPEED = -0.1  # 下降速度 m/s
         
         # 控制增益
-        self.Kp_xy = 0.18  # 水平控制增益
-        self.Kp_z = 0.18   # 垂直控制增益
+        self.Kp_xy = 0.2  # 水平控制增益
+        self.Kp_z = 0.2   # 垂直控制增益
         self.Kp_yaw = 0.005  # Yaw 角速度控制增益
         
         # 對齊檢查參數
         self.ALIGNMENT_THRESHOLD_XY = 0.05  # 水平偏差閾值 (m)
         self.ALIGNMENT_THRESHOLD_YAW = 1.0  # Yaw 角度偏差閾值 (度)
-        self.ALIGNMENT_HOLD_TIME = 0.2     # 對齊保持時間 (秒)
+        self.ALIGNMENT_HOLD_TIME = 0.5     # 對齊保持時間 (秒)
         self.current_time = 0.0             # 對齊時間初始化
         self.aligned_time = None            # 開始對齊的時間
         self.is_aligned = False             # 對齐狀態標記
@@ -250,34 +250,34 @@ class MultiMarkerLanding(Node):
         self.current_state = msg
     
     
-    def call_land_mode(self):
-        """呼叫 MAVROS set_mode service 切換到 LAND 模式"""
-        if self.land_mode_called:
+    def call_disarm(self):
+        """呼叫 MAVROS arming service 執行上鎖命令（暫時未使用）"""
+        if self.disarm_called:
             return
         
-        if not self.set_mode_client.wait_for_service(timeout_sec=1.0):
-            self.get_logger().warn('MAVROS set_mode service 不可用')
+        if not self.arming_client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().warn('MAVROS arming service 不可用')
             return
         
-        request = SetMode.Request()
-        request.custom_mode = 'LAND'
+        request = CommandBool.Request()
+        request.value = False  # False = 上鎖 (disarm)
         
-        self.get_logger().info('🛬 已對齊 ArUco 標記，呼叫 MAVROS 切換到 LAND 模式...')
+        self.get_logger().info('� 已對齊 ArUco 標記，呼叫 MAVROS 執行上鎖命令...')
         
-        future = self.set_mode_client.call_async(request)
-        future.add_done_callback(self.land_mode_callback)
-        self.land_mode_called = True
+        future = self.arming_client.call_async(request)
+        future.add_done_callback(self.disarm_callback)
+        self.disarm_called = True
     
-    def land_mode_callback(self, future):
-        """處理 set_mode service 回應"""
+    def disarm_callback(self, future):
+        """處理 arming service 回應"""
         try:
             response = future.result()
-            if response.mode_sent:
-                self.get_logger().info('✅ 成功切換到 LAND 模式')
+            if response.success:
+                self.get_logger().info('✅ 成功執行上鎖命令')
             else:
-                self.get_logger().error('❌ 切換到 LAND 模式失敗')
+                self.get_logger().error('❌ 上鎖命令執行失敗')
         except Exception as e:
-            self.get_logger().error(f'呼叫 set_mode service 時發生錯誤: {e}')
+            self.get_logger().error(f'呼叫 arming service 時發生錯誤: {e}')
     
     def publish_marker_transforms(self):
         """發佈 TF 框架：以 4 個 marker 的幾何中心為原點"""
@@ -394,7 +394,7 @@ class MultiMarkerLanding(Node):
         else:
             vel_cmd.angular.z = 0.0  # XY 未對齊時不旋轉
 
-        # # ===== 分階段垂直控制（只有對齊後才開始下降） =====
+        # # ===== 多段下降速度 =====
         # if not self.is_aligned:
         #     # 未對齊時：保持懸停，只進行水平和 yaw 修正
         #     vel_cmd.linear.z = 0.0
@@ -418,28 +418,8 @@ class MultiMarkerLanding(Node):
         #         self.get_logger().info('Final descent - gravity alignment phase')
         #         self.last_final_descent = True
 
-        # # 分階段垂直控制
-        # if self.current_altitude > 2.0:
-        #     # 高空階段：快速下降
-        #     vel_cmd.linear.z = -0.2
-        #     self.last_final_descent = False
-        # elif self.current_altitude > 0.6:
-        #     # 中空階段：穩定下降
-        #     vel_cmd.linear.z = self.DESCENT_SPEED
-        #     self.last_final_descent = False
-        # elif self.current_altitude > self.LANDING_ALTITUDE_THRESHOLD:
-        #     # 低空階段：緩慢降落
-        #     vel_cmd.linear.z = -0.1
-        #     self.last_final_descent = False
-        # else:
-        #     # 最終階段：依靠重力歸位
-        #     vel_cmd.linear.z = -0.05
-        #     if not self.last_final_descent:
-        #         self.get_logger().info('Final descent - gravity alignment phase')
-        #         self.last_final_descent = True
-
         # 速度限制
-        max_vel_xy = 0.5
+        max_vel_xy = 0.2
         max_vel_z = 0.2
         max_ang_z = 0.1  # 最大角速度 rad/s
 
