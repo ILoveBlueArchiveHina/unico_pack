@@ -77,7 +77,7 @@ class MultiMarkerLanding(Node):
         # 控制增益
         self.Kp_xy = 0.2  # 水平控制增益
         self.Kp_z = 0.2   # 垂直控制增益
-        self.Kp_yaw = 0.005  # Yaw 角速度控制增益
+        self.Kp_yaw = 0.05  # Yaw 角速度控制增益
         
         # 對齊檢查參數
         self.ALIGNMENT_THRESHOLD_XY = 0.05  # 水平偏差閾值 (m)
@@ -421,7 +421,7 @@ class MultiMarkerLanding(Node):
         # 速度限制
         max_vel_xy = 0.1
         max_vel_z = 0.1
-        max_ang_z = 0.05  # 最大角速度 rad/s
+        max_ang_z = 0.1  # 最大角速度 rad/s
 
         # 防護 NaN/inf
         for axis in ('x', 'y', 'z'):

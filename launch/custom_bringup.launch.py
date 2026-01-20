@@ -6,15 +6,21 @@ from launch_ros.actions import Node
 def generate_launch_description():
     params_file = LaunchConfiguration('params_file')
     use_sim_time = LaunchConfiguration('use_sim_time')
-
+    map_file = LaunchConfiguration('map_file')
+    
     declare_params = DeclareLaunchArgument(
         'params_file',
-        default_value='/home/uni_co/ros2_ws/src/unico_pack/config/custom_bringup.yaml'
+        default_value='/home/uni-co-jetson/ros2_ws/src/unico_pack/config/custom_bringup.yaml'
     )
 
     declare_sim = DeclareLaunchArgument(
         'use_sim_time',
         default_value='false'
+    )
+
+    declare_map = DeclareLaunchArgument(
+        'map_file',
+        default_value="/home/uni-co-jetson/ros2_ws/src/unico_pack/maps/warehouse_2d_map.yaml"
     )
 
     nodes = [
@@ -34,7 +40,7 @@ def generate_launch_description():
             output='screen',
             parameters=[params_file, {'use_sim_time': use_sim_time}],
             remappings=[
-                ('cmd_vel', 'cmd_vel_nav'),
+                ('cmd_vel', 'cmd_vel'),
             ],
         ),
         # smoother
@@ -85,7 +91,7 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'use_sim_time': use_sim_time,
-                'yaml_filename': '"/home/uni-co-jetson/ros2_ws/src/unico_pack/maps/map_v1_20251203/my_map120302.yaml"'
+                'yaml_filename': map_file,
             }]
         ),
 
@@ -112,4 +118,4 @@ def generate_launch_description():
         ),
     ]
 
-    return LaunchDescription([declare_params, declare_sim] + nodes)
+    return LaunchDescription([declare_params, declare_sim, declare_map] + nodes)
