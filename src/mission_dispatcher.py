@@ -4,7 +4,7 @@ from rclpy.node import Node
 from rclpy.action import ActionClient
 
 # Message type
-from campus_delivery_msgs.msg import NavTask  # my custom messages
+from campus_delivery_msgs.msg import NavTask  # My custom messages
 from nav2_msgs.action import FollowWaypoints # Nav2 Actions
 from geometry_msgs.msg import PoseStamped    # Nav2 target pose message type
 
