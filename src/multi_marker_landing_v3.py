@@ -5,8 +5,9 @@ import time
 from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped, Twist, TransformStamped
 from sensor_msgs.msg import NavSatFix
-from mavros_msgs.msg import State
+from mavros_msgs.msg import State, ExtendedState
 from mavros_msgs.srv import CommandBool, SetMode
+from nav_msgs.msg import Odometry
 from aruco_msgs.msg import MarkerArray
 from tf2_ros import TransformBroadcaster
 import numpy as np
@@ -33,13 +34,22 @@ class MultiMarkerLanding(Node):
             10
         )
         
-        # 訂閱高度資訊
-        # self.altitude_sub = self.create_subscription(
-        #     Altimeter,
-        #     '/altimeter',
-        #     self.altitude_callback,
-        #     10
-        # )
+        # 訂閱Extended State
+        self.extended_state_sub = self.create_subscription(
+            ExtendedState,
+            '/mavros/extended_state',
+            self.extended_state_callback,
+            10
+        )
+        
+        # 訂閱高度資訊 (來自 FAST-LIO Odometry)
+        self.altitude_sub = self.create_subscription(
+            Odometry,
+            '/Odometry',
+            self.altitude_callback,
+            10
+        )
+        
         
         # 發布速度控制指令
         self.vel_pub = self.create_publisher(
@@ -69,14 +79,11 @@ class MultiMarkerLanding(Node):
         # 降落參數
         self.MARKER_IDS = [10, 20, 30, 40]  # 外圈4個標記ID
         self.INNER_MARKER_IDS = [100, 200, 300, 400]  # 內圈4個標記ID
-        self.MARKER_SIZE = 0.10  # 10公分
         self.MIN_MARKERS_REQUIRED = 3  # 至少要看到3個標記
-        self.LANDING_ALTITUDE_THRESHOLD = 0.3  # 30公分內開始最終降落
-        self.DESCENT_SPEED = -0.05  # 下降速度 m/s
+        self.DESCENT_SPEED = -0.1  # 下降速度 m/s
         
         # 控制增益
-        self.Kp_xy = 0.2  # 水平控制增益
-        self.Kp_z = 0.2   # 垂直控制增益
+        self.Kp_xy = 0.3  # 水平控制增益
         self.Kp_yaw = 0.05  # Yaw 角速度控制增益
         
         # 對齊檢查參數
@@ -95,6 +102,7 @@ class MultiMarkerLanding(Node):
         # 狀態變化 log flag
         self.last_no_center = False
         self.last_final_descent = False
+        self.last_valid_time = self.get_clock().now() # 最後一次有效偵測時間
 
         self.get_logger().info('Multi-marker landing controller initialized')
         
@@ -162,6 +170,9 @@ class MultiMarkerLanding(Node):
                     f'Detected {len(self.detected_markers)} outer markers, using outer center'
                 )
                 self.last_marker_count = len(self.detected_markers)
+            
+            # 更新有效時間
+            self.last_valid_time = self.get_clock().now()
                 
         elif has_inner:
             # 外圈不足，但有內圈標記 -> 使用內圈中心點
@@ -180,6 +191,9 @@ class MultiMarkerLanding(Node):
                 )
             self.last_marker_count = len(self.detected_markers)
             self.last_inner_marker_count = len(self.detected_inner_markers)
+            
+            # 更新有效時間
+            self.last_valid_time = self.get_clock().now()
         else:
             # 外圈和內圈都不足
             self.get_logger().warn(
@@ -241,13 +255,18 @@ class MultiMarkerLanding(Node):
         
         return {'x': avg_x, 'y': avg_y, 'z': avg_z, 'yaw': avg_yaw}
     
-    # def altitude_callback(self, msg):
-    #     """更新當前高度"""
-    #     self.current_altitude = msg.vertical_position
     
+    def altitude_callback(self, msg):
+        """更新當前高度 (來自 FAST-LIO Odometry)"""
+        self.current_altitude = msg.pose.pose.position.z
+            
     def state_callback(self, msg):
         """更新飛控狀態"""
         self.current_state = msg
+    
+    def extended_state_callback(self, msg):
+        """更新 Extended State"""
+        self.current_extended_state = msg
     
     
     def call_disarm(self):
@@ -357,6 +376,22 @@ class MultiMarkerLanding(Node):
 
     def control_loop(self):
         """主控制迴圈"""
+        # --- 安全檢查：訊號超時保護 ---
+        # 如果超過 0.5 秒沒有偵測到有效標記，視為訊號遺失
+        now = self.get_clock().now()
+        dt_lost = (now - self.last_valid_time).nanoseconds / 1e9
+        
+        if dt_lost > 0.5:
+            if not self.last_no_center:
+                self.get_logger().warn(f'🚨 標記訊號遺失 ({dt_lost:.2f}s)！停止移動')
+                self.last_no_center = True
+            
+            # 發布零速度懸停
+            self.vel_pub.publish(Twist())
+            self.last_final_descent = False
+            self.marker_buffer.clear() # 清除舊數據
+            return
+
         # 獲取平滑後的中心點
         center = self.get_smoothed_center()
         
@@ -394,30 +429,6 @@ class MultiMarkerLanding(Node):
         else:
             vel_cmd.angular.z = 0.0  # XY 未對齊時不旋轉
 
-        # # ===== 多段下降速度 =====
-        # if not self.is_aligned:
-        #     # 未對齊時：保持懸停，只進行水平和 yaw 修正
-        #     vel_cmd.linear.z = 0.0
-        #     self.last_final_descent = False
-        # elif self.current_altitude > 2.0:
-        #     # 對齊後 - 高空階段：快速下降
-        #     vel_cmd.linear.z = -0.2
-        #     self.last_final_descent = False
-        # elif self.current_altitude > 0.6:
-        #     # 中空階段：穩定下降
-        #     vel_cmd.linear.z = self.DESCENT_SPEED
-        #     self.last_final_descent = False
-        # elif self.current_altitude > self.LANDING_ALTITUDE_THRESHOLD:
-        #     # 低空階段：緩慢降落
-        #     vel_cmd.linear.z = -0.1
-        #     self.last_final_descent = False
-        # else:
-        #     # 最終階段：依靠重力歸位
-        #     vel_cmd.linear.z = -0.05
-        #     if not self.last_final_descent:
-        #         self.get_logger().info('Final descent - gravity alignment phase')
-        #         self.last_final_descent = True
-
         # 速度限制
         max_vel_xy = 0.1
         max_vel_z = 0.1
@@ -442,16 +453,22 @@ class MultiMarkerLanding(Node):
         # 發布速度指令
         self.vel_pub.publish(vel_cmd)
 
-        # 判斷降落成功
-        # if self.current_altitude < 0.02:
-        #     # 發布零速度
-        #     zero_cmd = Twist()
-        #     self.vel_pub.publish(zero_cmd)
-        #     self.get_logger().info('降落成功！高度 < 0.02m，停止控制')
-        #     # 設定標記，讓 main 在主執行緒中安全地關閉
-        #     self.landing_complete = True
-        #     return
+        # 判斷降落成功 - 使用 Extended State
+        if hasattr(self, 'current_extended_state'):
+            if self.current_extended_state.landed_state == ExtendedState.LANDED_STATE_ON_GROUND:
+                # 發布零速度
+                zero_cmd = Twist()
+                self.vel_pub.publish(zero_cmd)
+                self.get_logger().info('Extended State 確認已著陸 (ON_GROUND)')
+                
+                # 嘗試上鎖確保安全
+                if not self.disarm_called:
+                    self.call_disarm()
+                
+                self.landing_complete = True
+                return
             
+
 
 def main(args=None):
     rclpy.init(args=args)
