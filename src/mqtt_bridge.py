@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
 import json
@@ -14,7 +15,7 @@ class MqttToRosBridge(Node):
         super().__init__('mqtt_bridge')
 
         # --- Setting parameters ---
-        self.mqtt_broker = "127.0.0.1"
+        self.mqtt_broker = "broker.emqx.io"
         self.mqtt_topic = "uav/navigation/tasks"
         self.ros_topic = "navigation_tasks" # Republished ROS topic name
 
@@ -63,7 +64,7 @@ class MqttToRosBridge(Node):
                 # use float() type
                 wp_msg.x = float(wp_data.get("x", 0.0))
                 wp_msg.y = float(wp_data.get("y", 0.0))
-                wp_msg.theta = float(wp_data.get("theta", 0.0))
+                wp_msg.theta = float(wp_data.get("yaw", 0.0))
                 ros_msg.waypoints.append(wp_msg)
 
             # --- Publishing messages ---

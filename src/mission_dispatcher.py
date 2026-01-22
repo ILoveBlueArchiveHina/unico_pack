@@ -1,10 +1,11 @@
+#!/usr/bin/env python3
 import rclpy
 import math
 from rclpy.node import Node
 from rclpy.action import ActionClient
 
 # Message type
-from campus_delivery_msgs.msg import NavTask  # My custom messages
+from campus_delivery_msgs.msg import NavTask, NavResult  # My custom messages
 from nav2_msgs.action import FollowWaypoints # Nav2 Actions
 from geometry_msgs.msg import PoseStamped    # Nav2 target pose message type
 
@@ -20,14 +21,22 @@ class Nav2Executor(Node):
             self.listener_callback,
             10)
 
+        self.pub = self.create_publisher(
+            NavResult,
+            'navigation_result',
+            10)
+
         # 2. Create Nav2 Action Client
         self._action_client = ActionClient(self, FollowWaypoints, 'follow_waypoints')
 
         self.get_logger().info("Nav2 Executor Node Started. Waiting for tasks...")
 
+        self.tesk_id = 0
+
     def listener_callback(self, msg):
         """Receive task from MQTT Bridge and call Nav2"""
         self.get_logger().info(f"Received Task ID: {msg.task_id} with {len(msg.waypoints)} points")
+        self.tesk_id = msg.task_id
 
         # Call processing function
         self.send_goal_to_nav2(msg.waypoints)
@@ -73,6 +82,12 @@ class Nav2Executor(Node):
             return
 
         self.get_logger().info('Goal accepted! UAV is moving.')
+        result_msg = NavResult()
+        result_msg.header.stamp = self.get_clock().now().to_msg()
+        result_msg.header.frame_id = "map"
+        result_msg.tesk_id = self.task_id
+        result_msg.feedback = 0
+        self.pub.publish(result_msg)
         
         # Attach result_callback to know when navigation is complete
         self._get_result_future = goal_handle.get_result_async()
