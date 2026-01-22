@@ -116,6 +116,10 @@ def generate_launch_description():
                 ]
             }]
         ),
+        Node(
+            package='unico_pack',
+            executable='cmd_vel_bridge.py',
+        ),
     ]
 
     return LaunchDescription([declare_params, declare_sim, declare_map] + nodes)
