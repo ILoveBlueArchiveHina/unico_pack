@@ -118,11 +118,12 @@ class MqttToRosBridge(Node):
             
             self.get_logger().info("RTC Wake Alarm set successfully.")
             
-            # 2. Countdown and Shutdown
-            self.get_logger().warn("System shutting down in 5 seconds...")
+            # 2. Countdown and Suspend (Sleep Mode)
+            self.get_logger().warn("System suspending (sleep mode) in 5 seconds...")
             time.sleep(5)
             
-            subprocess.run("sudo shutdown -h now", shell=True, check=True)
+            # Use 'systemctl suspend' instead of 'shutdown'
+            subprocess.run("sudo systemctl suspend", shell=True, check=True)
             
         except subprocess.CalledProcessError as e:
             self.get_logger().error(f"System command failed: {e}. Check sudo permissions.")
