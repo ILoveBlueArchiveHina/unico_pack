@@ -6,6 +6,8 @@ from rclpy.action import ActionClient
 from rclpy.callback_groups import ReentrantCallbackGroup
 from tf2_ros import Buffer, TransformListener
 from action_msgs.msg import GoalStatus
+from functools import partial
+from collections import deque
 
 # Message type
 from campus_delivery_msgs.msg import NavTask, NavResult  # My custom messages
@@ -60,13 +62,37 @@ class Nav2Executor(Node):
         self.cargo_queue = [] # Queue for sequential cargo legs
         self.current_leg_index = 0 # Track which leg we are on (1-4)
         self.failed_faces = [] # Store which faces failed sampling
+        
+        # XTE Monitoring State
+        self.current_leg_start = (0.0, 0.0)
+        self.current_leg_end = (0.0, 0.0)
+        self.monitoring_timer = None
+        self.current_goal_handle = None # Store handle to cancel if needed
+        
+        self.is_busy = False # (Optional now, but good for logging)
+        self.execution_seq = 0 # Sequence ID to invalidate old callbacks
 
     def listener_callback(self, msg):
-        """Receive task from MQTT Bridge and call Nav2"""
-        self.get_logger().info(f"Received Task ID: {msg.task_id} with {len(msg.waypoints)} points")
+        """Receive task from MQTT Bridge and Overwrite current task"""
+        self.get_logger().info(f"Received Task ID: {msg.task_id}. Overwriting/Starting...")
+        
+        # Increment execution sequence to invalidate ANY pending callbacks from previous tasks
+        self.execution_seq += 1
+        
+        # Stop any previous monitoring or logic
+        self.stop_monitoring()
+        if hasattr(self, 'next_task_timer') and self.next_task_timer:
+            self.next_task_timer.cancel()
+            self.next_task_timer = None
+            
+        # Reset State
+        self.is_busy = True
         self.task_id = msg.task_id
-
-        # Call processing function
+        self.tracking_active = False
+        self.cargo_queue = []
+        self.failed_faces = []
+        
+        # Start new task
         self.send_goal_to_nav2(msg.waypoints)
 
     def send_goal_to_nav2(self, waypoints_data):
@@ -113,12 +139,9 @@ class Nav2Executor(Node):
             p_start = expanded_points[i]
             p_end = expanded_points[(i+1)%4]
             
-            # Midpoint
-            p_mid = ((p_start[0] + p_end[0])/2.0, (p_start[1] + p_end[1])/2.0)
-            
-            # Create Path: Mid -> End (Start excluded)
-            leg_points = [p_mid, p_end]
-            self.cargo_queue.append(leg_points)
+            # Create Path: Endpoint Only
+            leg_info = {'start': p_start, 'end': p_end}
+            self.cargo_queue.append(leg_info)
             
         self.get_logger().info(f"Generated {len(self.cargo_queue)} inspection legs. Starting execution...")
         
@@ -136,24 +159,29 @@ class Nav2Executor(Node):
         
         if not self._action_client.wait_for_server(timeout_sec=5.0):
             self.get_logger().error('Nav2 Action Server not available for approach!')
-            self.finish_task(success=False)
+            # self.finish_task(success=False) # Skip validation here as it's immediate
             return
             
         future = self._action_client.send_goal_async(goal_msg)
-        future.add_done_callback(self.approach_response_callback)
+        # Pass current seq to callback
+        future.add_done_callback(partial(self.approach_response_callback, seq=self.execution_seq))
 
-    def approach_response_callback(self, future):
+    def approach_response_callback(self, future, seq):
+        if seq != self.execution_seq: return
+        
         goal_handle = future.result()
         if not goal_handle.accepted:
             self.get_logger().error('Approach goal rejected!')
-            self.finish_task(success=False)
+            self.finish_task(success=False, seq=seq)
             return
             
         self.get_logger().info('Approach goal accepted.')
         result_future = goal_handle.get_result_async()
-        result_future.add_done_callback(self.approach_result_callback)
+        result_future.add_done_callback(partial(self.approach_result_callback, seq=seq))
 
-    def approach_result_callback(self, future):
+    def approach_result_callback(self, future, seq):
+        if seq != self.execution_seq: return
+
         result = future.result().result
         if len(result.missed_waypoints) == 0:
              self.get_logger().info('Phase 1: Approach Complete. Starting Phase 2: Inspection Loop.')
@@ -161,7 +189,7 @@ class Nav2Executor(Node):
              self.process_next_cargo_leg()
         else:
              self.get_logger().warn('Phase 1: Approach Failed.')
-             self.finish_task(success=False)
+             self.finish_task(success=False, seq=seq)
 
     def create_pose(self, x, y):
         pose = PoseStamped()
@@ -176,58 +204,131 @@ class Nav2Executor(Node):
         """Execute next leg in the queue"""
         if not self.cargo_queue:
             self.get_logger().info("All cargo legs completed!")
-            self.finish_task(success=True)
+            self.finish_task(success=True, seq=self.execution_seq)
             return
             
-        current_leg_points = self.cargo_queue.pop(0)
+        leg_info = self.cargo_queue.pop(0)
         self.current_leg_index += 1
-        self.get_logger().info(f"Starting Leg {self.current_leg_index}/4 (FollowWaypoints Mode). Remaining: {len(self.cargo_queue)}")
         
-        # Unified: Use FollowWaypoints for the leg (Mid -> End)
+        # Setup XTE Monitoring parameters
+        self.current_leg_start = leg_info['start']
+        self.current_leg_end = leg_info['end']
+        
+        self.get_logger().info(f"Starting Face {self.current_leg_index}/4. Target: {self.current_leg_end}")
+        
+        # Target: Endpoint only
         goal_msg = FollowWaypoints.Goal()
-        goal_msg.poses = [self.create_pose(p[0], p[1]) for p in current_leg_points]
+        goal_msg.poses = [self.create_pose(self.current_leg_end[0], self.current_leg_end[1])]
         
         if not self._action_client.wait_for_server(timeout_sec=5.0):
              self.get_logger().error('Nav2 Action Server not available!')
-             self.finish_task(success=False)
+             self.finish_task(success=False, seq=self.execution_seq)
              return
              
         future = self._action_client.send_goal_async(goal_msg)
-        future.add_done_callback(self.cargo_leg_response_callback)
+        future.add_done_callback(partial(self.cargo_leg_response_callback, seq=self.execution_seq))
 
-    def cargo_leg_response_callback(self, future):
+    def cargo_leg_response_callback(self, future, seq):
+        if seq != self.execution_seq: return
+
         goal_handle = future.result()
         if not goal_handle.accepted:
             self.get_logger().error(f'Cargo leg {self.current_leg_index} rejected!')
-            self.finish_task(success=False)
+            self.finish_task(success=False, seq=seq)
             return
             
+        self.current_goal_handle = goal_handle
+        
+        # Start XTE Monitoring Timer (10Hz)
+        self.monitoring_timer = self.create_timer(0.1, self.monitoring_callback)
+        
         result_future = goal_handle.get_result_async()
-        result_future.add_done_callback(self.cargo_leg_result_callback)
+        result_future.add_done_callback(partial(self.cargo_leg_result_callback, seq=seq))
 
-    def cargo_leg_result_callback(self, future):
-        result = future.result().result
+    def monitoring_callback(self):
+        """Check Cross-Track Error"""
+        # Note: Monitoring timer runs freely, but checking self.execution_seq inside timer is hard because timer is persistent? 
+        # Actually timer is recreated in cargo_leg_response_callback.
+        # But if old timer is not cancelled properly (e.g. race condition), it might run.
+        # We did self.stop_monitoring() in listener_callback, so it should be fine.
+        try:
+             # Get robot position
+            transform = self.tf_buffer.lookup_transform(
+                'map',
+                'base_link',
+                rclpy.time.Time(),
+                timeout=rclpy.duration.Duration(seconds=0.0)
+            )
+            rx = transform.transform.translation.x
+            ry = transform.transform.translation.y
+            
+            # Line Segment P1->P2
+            p1x, p1y = self.current_leg_start
+            p2x, p2y = self.current_leg_end
+            
+            # Vector P1->P2
+            dx = p2x - p1x
+            dy = p2y - p1y
+            
+            # Vector P1->Robot
+            drx = rx - p1x
+            dry = ry - p1y
+            
+            # Project Robot onto line (dot product) / Length^2
+            l2 = dx*dx + dy*dy
+            if l2 == 0: return # Zero length leg?
+            
+            t = (drx*dx + dry*dy) / l2
+            
+            # Perpendicular distance check
+            # Cross product method for 2D XTE: |dx*dry - dy*drx| / Sqrt(l2)
+            cross_prod = abs(dx*dry - dy*drx)
+            xte = cross_prod / math.sqrt(l2)
+            
+            # Threshold Check
+            if xte > 1.5:
+                self.get_logger().warn(f"Detour Detected! XTE: {xte:.2f}m > 1.5m. Marking Face {self.current_leg_index} as Failed (Sampling Error) but continuing navigation.")
+                self.failed_faces.append(self.current_leg_index)
+                self.stop_monitoring()
+                # Do NOT Cancel Goal - let it complete the detour to avoid getting stuck
+                    
+        except Exception as e:
+            pass
+
+    def stop_monitoring(self):
+        if self.monitoring_timer:
+            self.monitoring_timer.cancel()
+            self.monitoring_timer = None
+
+    def cargo_leg_result_callback(self, future, seq):
+        if seq != self.execution_seq: return
+        self.stop_monitoring() # Ensure timer stopped
         
-        # Check missed waypoints
-        # The goal had 2 points: [0: Mid, 1: End]
-        missed = result.missed_waypoints
+        result = future.result()
+        status = result.status
         
-        # Check if Midpoint (Index 0) was missed
-        if 0 in missed:
-             self.get_logger().warn(f"Face {self.current_leg_index} Sampling Failed (Midpoint unreachable). Skipped to Endpoint.")
+        # Check if cancelled (by us due to XTE) or failed
+        if status == GoalStatus.STATUS_CANCELED:
+             self.get_logger().warn(f"Face {self.current_leg_index} Cancelled (Detour).")
              self.failed_faces.append(self.current_leg_index)
-        
-        # Check if Endpoint (Index 1) was missed 
-        # If endpoint missed, we might be stuck, but we proceed to next leg anyway
-        if 1 in missed:
-             self.get_logger().warn(f"Face {self.current_leg_index} Endpoint unreachable.")
-             # Potentially add to failed list or handle separately. For now, we assume critical if endpoint fails.
-             # But user logic implies we just keep going.
+        elif status == GoalStatus.STATUS_ABORTED:
+             self.get_logger().warn(f"Face {self.current_leg_index} Aborted.")
+             self.failed_faces.append(self.current_leg_index)
+        elif status == GoalStatus.STATUS_SUCCEEDED:
+             self.get_logger().info(f"Face {self.current_leg_index} Succeeded.")
+        else:
+             # Other statuses
+             pass
              
         # Continue to next leg
         self.process_next_cargo_leg()
 
-    def finish_task(self, success):
+    def finish_task(self, success, seq=None):
+        """Finish Task and Report. Check sequence if provided."""
+        if seq is not None and seq != self.execution_seq:
+            self.get_logger().info(f"Ignoring finish_task for old sequence {seq}. Current: {self.execution_seq}")
+            return
+
         self.tracking_active = False
         result_msg = NavResult()
         result_msg.header.stamp = self.get_clock().now().to_msg()
@@ -250,28 +351,54 @@ class Nav2Executor(Node):
              
         self.pub.publish(result_msg)
         self.cmd_pub.publish(Twist())
+        
+        self.is_busy = False
 
-    def goal_response_callback(self, future):
+    def goal_response_callback(self, future, seq):
+        if seq != self.execution_seq: return
+        
         goal_handle = future.result()
         if not goal_handle.accepted:
             self.get_logger().info('Goal rejected :(')
+            self.is_busy = False 
             return
 
         self.get_logger().info('Goal accepted! UAV is moving.')
         
         # Attach result_callback to know when navigation is complete
         self._get_result_future = goal_handle.get_result_async()
-        self._get_result_future.add_done_callback(self.get_result_callback)
+        self._get_result_future.add_done_callback(partial(self.get_result_callback, seq=seq))
 
-    def get_result_callback(self, future):
+    def get_result_callback(self, future, seq):
+        if seq != self.execution_seq: return
+
         """Callback after navigation is complete"""
         result = future.result().result
         # FollowWaypoints result usually contains missed_waypoints
         if len(result.missed_waypoints) == 0:
-             self.finish_task(success=True)
+             self.finish_task(success=True, seq=seq)
         else:
              self.get_logger().warn(f'Task Finished but missed {len(result.missed_waypoints)} waypoints.')
-             self.finish_task(success=False)
+             self.finish_task(success=False, seq=seq)
+
+    def handle_standard_task(self, waypoints_data):
+        self.get_logger().info("Standard Task Detected")
+        # Standard logic
+        goal_msg = FollowWaypoints.Goal()
+        # Create standard poses
+        poses = []
+        for wp in waypoints_data:
+            poses.append(self.create_pose(wp.x, wp.y))
+        
+        goal_msg.poses = poses
+        
+        if not self._action_client.wait_for_server(timeout_sec=5.0):
+             self.get_logger().error('Nav2 Action Server not available!')
+             self.is_busy = False
+             return
+             
+        future = self._action_client.send_goal_async(goal_msg)
+        future.add_done_callback(partial(self.goal_response_callback, seq=self.execution_seq))
 
     def cmd_vel_callback(self, msg):
         """Intercept Nav2 cmd_vel and override angular velocity if tracking"""
@@ -331,9 +458,13 @@ class Nav2Executor(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = Nav2Executor()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
 if __name__ == '__main__':
     main()

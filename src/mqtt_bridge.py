@@ -97,7 +97,7 @@ class MqttToRosBridge(Node):
     def schedule_shutdown_next_noon(self):
         # Calculate duration until Today 18:35
         now = datetime.now()
-        target_time = now.replace(hour=18, minute=35, second=0, microsecond=0)
+        target_time = now.replace(hour=10, minute=0, second=0, microsecond=0)
         
         # If already passed 18:35, schedule for tomorrow 18:35 (or handle as immediate/error? Assuming tomorrow for safety)
         if target_time < now:

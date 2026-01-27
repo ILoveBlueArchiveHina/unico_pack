@@ -204,10 +204,10 @@ local_costmap:
       robot_base_frame: base_link
       use_sim_time: False
       rolling_window: true
-      width: 5
-      height: 5
+      width: 3
+      height: 3
       resolution: 0.05
-      robot_radius: 0.8
+      robot_radius: 0.5
       plugins: ["voxel_layer", "inflation_layer"]
       # obstacle_layer:
       #   plugin: "nav2_costmap_2d::ObstacleLayer"
@@ -225,7 +225,7 @@ local_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 3.0
-        inflation_radius: 0.9
+        inflation_radius: 1.2
       voxel_layer:
         plugin: "nav2_costmap_2d::VoxelLayer"
         enabled: true
@@ -258,7 +258,7 @@ global_costmap:    # 全域代價地圖
       global_frame: map
       robot_base_frame: base_link
       use_sim_time: False
-      robot_radius: 0.9
+      robot_radius: 0.5
       resolution: 0.05
       track_unknown_space: true
       plugins: ["static_layer", "voxel_layer", "inflation_layer"]
@@ -303,7 +303,7 @@ global_costmap:    # 全域代價地圖
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 3.0
-        inflation_radius: 0.9
+        inflation_radius: 1.2
       always_send_full_costmap: True
 
 map_server:
