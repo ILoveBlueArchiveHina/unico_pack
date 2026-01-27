@@ -95,16 +95,21 @@ class MqttToRosBridge(Node):
             self.schedule_shutdown_next_noon()
 
     def schedule_shutdown_next_noon(self):
-        # Calculate wake time: Next Day 12:00 PM
+        # Calculate duration until Today 18:35
         now = datetime.now()
-        tomorrow = now + timedelta(days=1)
-        # Set to Noon (12:00:00)
-        # resume_time = datetime(tomorrow.year, tomorrow.month, tomorrow.day, 12, 0, 0)
-        resume_time = datetime(now.year, now.month, now.day, 17, 30, 0)
-        # resume_time = datetime.now() + timedelta(minutes=5)
-        wake_timestamp = int(resume_time.timestamp())
+        target_time = now.replace(hour=18, minute=35, second=0, microsecond=0)
         
-        self.get_logger().warn(f"Shutdown sequence initiated. System will wake up at {resume_time} (Timestamp: {wake_timestamp})")
+        # If already passed 18:35, schedule for tomorrow 18:35 (or handle as immediate/error? Assuming tomorrow for safety)
+        if target_time < now:
+            target_time += timedelta(days=1)
+            
+        duration_seconds = (target_time - now).total_seconds()
+        
+        # Set absolute wake timestamp based on current system epoch + duration
+        # This avoids timezone object confusion (UTC vs Local Datetime)
+        wake_timestamp = int(time.time() + duration_seconds)
+        
+        self.get_logger().warn(f"Shutdown sequence initiated. System will wake up in {duration_seconds/60:.2f} minutes (Target: {target_time.strftime('%H:%M:%S')})")
         
         try:
             # 1. Set RTC Wake Alarm (Requires sudo/root permissions)
