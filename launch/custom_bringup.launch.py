@@ -40,17 +40,17 @@ def generate_launch_description():
             output='screen',
             parameters=[params_file, {'use_sim_time': use_sim_time}],
             remappings=[
-                ('cmd_vel', 'cmd_vel'),
+                ('cmd_vel', 'cmd_vel_nav'),
             ],
         ),
         # smoother
-        Node(
-            package='nav2_smoother',
-            executable='smoother_server',
-            name='smoother_server',
-            output='screen',
-            parameters=[params_file, {'use_sim_time': use_sim_time}]
-        ),
+        # Node(
+        #     package='nav2_smoother',
+        #     executable='smoother_server',
+        #     name='smoother_server',
+        #     output='screen',
+        #     parameters=[params_file, {'use_sim_time': use_sim_time}]
+        # ),
         # behaviors（spin / backup / drive_on_heading / wait）
         Node(
             package='nav2_behaviors',
@@ -106,7 +106,7 @@ def generate_launch_description():
                 'autostart': True,
                 'node_names': [
                     'controller_server',
-                    'smoother_server',
+                    # 'smoother_server',
                     'planner_server',
                     'behavior_server',
                     'bt_navigator',
