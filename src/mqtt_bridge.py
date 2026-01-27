@@ -100,7 +100,8 @@ class MqttToRosBridge(Node):
         tomorrow = now + timedelta(days=1)
         # Set to Noon (12:00:00)
         # resume_time = datetime(tomorrow.year, tomorrow.month, tomorrow.day, 12, 0, 0)
-        resume_time = datetime.now() + timedelta(minutes=5)
+        resume_time = datetime(now.year, now.month, now.day, 17, 30, 0)
+        # resume_time = datetime.now() + timedelta(minutes=5)
         wake_timestamp = int(resume_time.timestamp())
         
         self.get_logger().warn(f"Shutdown sequence initiated. System will wake up at {resume_time} (Timestamp: {wake_timestamp})")
