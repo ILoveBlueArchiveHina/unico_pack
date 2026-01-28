@@ -10,6 +10,7 @@ from mavros_msgs.srv import CommandBool, SetMode
 from nav_msgs.msg import Odometry
 from aruco_msgs.msg import MarkerArray
 from tf2_ros import TransformBroadcaster
+from std_msgs.msg import Bool
 import numpy as np
 from collections import deque
 from scipy.spatial.transform import Rotation as rot
@@ -57,6 +58,12 @@ class MultiMarkerLanding(Node):
             '/cmd_vel',
             10
         )
+
+        self.is_landed_pub = self.create_publisher(
+            Bool,
+            '/is_landed',
+            10
+        )
         
         # TF 廣播器 (為 marker 發佈 transform)
         self.tf_broadcaster = TransformBroadcaster(self)
@@ -84,7 +91,7 @@ class MultiMarkerLanding(Node):
         
         # 控制增益
         self.Kp_xy = 0.3  # 水平控制增益
-        self.Kp_yaw = 0.05  # Yaw 角速度控制增益
+        self.Kp_yaw = 0.02  # Yaw 角速度控制增益
         
         # 對齊檢查參數
         self.ALIGNMENT_THRESHOLD_XY = 0.05  # 水平偏差閾值 (m)
@@ -293,6 +300,7 @@ class MultiMarkerLanding(Node):
             response = future.result()
             if response.success:
                 self.get_logger().info('✅ 成功執行上鎖命令')
+                self.is_landed_pub(Bool().data=True)  # 和 manager管理節點說已經降落完成，可以關閉精準降落程序
             else:
                 self.get_logger().error('❌ 上鎖命令執行失敗')
         except Exception as e:
