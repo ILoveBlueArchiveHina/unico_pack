@@ -25,7 +25,9 @@ install(
   src/multi_marker_landing_v3.py
   src/mission_dispatcher.py
   src/mission_dispatcher_with_tracker.py
+  src/mission_dispatcher_with_tracker_v2.py
   src/mqtt_bridge.py
+  src/manager.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
