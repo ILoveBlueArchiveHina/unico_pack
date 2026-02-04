@@ -95,32 +95,52 @@ class MqttToRosBridge(Node):
             self.get_logger().error(f"Error converting message: {e}")
 
     def handle_navigation_task(self, data):
-        # --- Create ROS messages ---
-        ros_msg = NavTask()
-        
-        # 1. Header
-        ros_msg.header = Header()
-        ros_msg.header.stamp = self.get_clock().now().to_msg()
-        ros_msg.header.frame_id = "map" # Refference tf frame
+        task_list = data if isinstance(data, list) else [data]
 
-        # 2. basic information
-        ros_msg.task_id = data.get("task_id", "")
-        ros_msg.command = data.get("command", "")
-        ros_msg.source_timestamp = str(data.get("timestamp", ""))
+        for task_data in task_list:
+            # --- Create ROS messages (Must be created inside the loop) ---
+            ros_msg = NavTask()
+            
+            # 1. Header
+            ros_msg.header = Header()
+            ros_msg.header.stamp = self.get_clock().now().to_msg()
+            ros_msg.header.frame_id = "map" # Reference tf frame
 
-        # 3. Waypoints list
-        json_waypoints = data.get("waypoints", [])
-        for wp_data in json_waypoints:
-            wp_msg = Pose2D()
-            # use float() type
-            wp_msg.x = float(wp_data.get("x", 0.0))
-            wp_msg.y = float(wp_data.get("y", 0.0))
-            wp_msg.theta = float(wp_data.get("yaw", 0.0))
-            ros_msg.waypoints.append(wp_msg)
+            # 2. Basic information
+            ros_msg.task_id = task_data.get("task_id", "")
+            # JSON 範例中沒有 command，給予預設值或保留空字串
+            ros_msg.command = task_data.get("command", "navigate") 
+            ros_msg.source_timestamp = str(task_data.get("timestamp", ""))
+
+            # 3. Waypoints / Area parsing
+            # 優先檢查是否有 'area' (扁平陣列 [x,y,x,y])
+            if "area" in task_data:
+                area_coords = task_data.get("area", [])
+                # 確保長度是偶數，並且每兩個一組取 (x, y)
+                if len(area_coords) >= 2:
+                    for i in range(0, len(area_coords), 2):
+                        # 防止陣列長度奇數導致 index out of range
+                        if i + 1 < len(area_coords):
+                            wp_msg = Pose2D()
+                            wp_msg.x = float(area_coords[i])
+                            wp_msg.y = float(area_coords[i+1])
+                            wp_msg.theta = 0.0  # Area 通常只標示範圍，沒有方向，預設為 0
+                            ros_msg.waypoints.append(wp_msg)
+                            
+            # 相容舊有的 'waypoints' 格式 (物件列表 [{'x':1, 'y':2}])
+            elif "waypoints" in task_data:
+                json_waypoints = task_data.get("waypoints", [])
+                for wp_data in json_waypoints:
+                    wp_msg = Pose2D()
+                    wp_msg.x = float(wp_data.get("x", 0.0))
+                    wp_msg.y = float(wp_data.get("y", 0.0))
+                    wp_msg.theta = float(wp_data.get("yaw", 0.0))
+                    ros_msg.waypoints.append(wp_msg)
 
         # --- Queue Logic ---
-        self.task_queue.append(ros_msg)
-        self.get_logger().info(f"Queued Task {ros_msg.task_id}. Queue size: {len(self.task_queue)}")
+            self.task_queue.append(ros_msg)
+            self.get_logger().info(f"Queued Task {ros_msg.task_id}. Queue size: {len(self.task_queue)}")
+
         
         # Try to process immediately if idle
         # If we are returning home, we don't interrupt immediately, 

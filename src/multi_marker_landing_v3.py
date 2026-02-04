@@ -300,7 +300,9 @@ class MultiMarkerLanding(Node):
             response = future.result()
             if response.success:
                 self.get_logger().info('✅ 成功執行上鎖命令')
-                self.is_landed_pub(Bool().data=True)  # 和 manager管理節點說已經降落完成，可以關閉精準降落程序
+                msg=Bool()
+                msg.data=True
+                self.is_landed_pub(msg)  # 和 manager管理節點說已經降落完成，可以關閉精準降落程序
             else:
                 self.get_logger().error('❌ 上鎖命令執行失敗')
         except Exception as e:
@@ -385,11 +387,11 @@ class MultiMarkerLanding(Node):
     def control_loop(self):
         """主控制迴圈"""
         # --- 安全檢查：訊號超時保護 ---
-        # 如果超過 0.5 秒沒有偵測到有效標記，視為訊號遺失
+        # 如果超過 1 秒沒有偵測到有效標記，視為訊號遺失
         now = self.get_clock().now()
         dt_lost = (now - self.last_valid_time).nanoseconds / 1e9
         
-        if dt_lost > 0.5:
+        if dt_lost > 1:
             if not self.last_no_center:
                 self.get_logger().warn(f'🚨 標記訊號遺失 ({dt_lost:.2f}s)！停止移動')
                 self.last_no_center = True

@@ -277,7 +277,7 @@ class Nav2Executor(Node):
             # Get current robot pose
             transform = self.tf_buffer.lookup_transform(
                 'map',
-                'base_link',
+                'body',
                 rclpy.time.Time(),
                 timeout=rclpy.duration.Duration(seconds=0.1)
             )
