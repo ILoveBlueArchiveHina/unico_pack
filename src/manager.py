@@ -201,7 +201,7 @@ class MqttToRosBridge(Node):
         goal_msg.pose.header.stamp = self.get_clock().now().to_msg()
         # Home Position (0,-20)
         goal_msg.pose.pose.position.x = 0.0
-        goal_msg.pose.pose.position.y = -20.0
+        goal_msg.pose.pose.position.y = 0.0
         goal_msg.pose.pose.orientation.w = 1.0
 
         self.get_logger().info("Sending Home Goal...")

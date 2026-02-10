@@ -10,7 +10,7 @@ def generate_launch_description():
     
     declare_params = DeclareLaunchArgument(
         'params_file',
-        default_value='/home/uni-co-jetson/ros2_ws/src/unico_pack/config/custom_bringup_v2.yaml'
+        default_value='/home/uni-co-jetson/ros2_ws/src/unico_pack/config/custom_bringup_v3.yaml'
     )
 
     declare_sim = DeclareLaunchArgument(
@@ -40,7 +40,7 @@ def generate_launch_description():
             output='screen',
             parameters=[params_file, {'use_sim_time': use_sim_time}],
             remappings=[
-                ('cmd_vel', 'cmd_vel'),
+                ('cmd_vel', 'cmd_vel_nav'),
             ],
         ),
         # smoother
