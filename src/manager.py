@@ -8,13 +8,16 @@ import time
 import os
 import signal
 from datetime import datetime, timedelta
+from rclpy.qos import qos_profile_sensor_data
 
 # Import message type
 from campus_delivery_msgs.msg import NavTask, NavResult
 from geometry_msgs.msg import Pose2D, PoseStamped
+from sensor_msgs.msg import BatteryState
 from std_msgs.msg import Header, Bool
 from nav2_msgs.action import NavigateToPose
 from rclpy.action import ActionClient
+
 
 class MqttToRosBridge(Node):
 
@@ -22,10 +25,21 @@ class MqttToRosBridge(Node):
         super().__init__('mqtt_bridge')
 
         # --- Setting parameters ---
+        self.declare_parameter("home_pose_x",0.0)
+        self.declare_parameter("home_pose_y",0.0)
+        self.declare_parameter("rosbag_folder_path","/home/uni-co-jetson/rosbag")
+
+        self.home_pose_x = self.get_parameter("home_pose_x").value
+        self.home_pose_y = self.get_parameter("home_pose_y").value
+        self.rosbag_folder_path = self.get_parameter("rosbag_folder_path").value
+
+        # --- MQTT ROS 2 bridge topics ---
         self.mqtt_broker = "broker.emqx.io"
         self.nav_topic = "uav/navigation/tasks"
         self.notification_topic = "warehouse/task/notification"
-        self.status_topic = "warehouse/task/remaining" # Topic for reporting back to server
+        self.cancelled_topic = "warehouse/task/remaining" # Topic for reporting back to server
+        self.status_topic = "warehouse/task/status"
+        self.feedback_topic = "warehouse/task/feedback"
         self.ros_topic = "navigation_tasks" # Republished ROS topic name
 
         # ---  ROS Publisher initialization ---
@@ -50,6 +64,24 @@ class MqttToRosBridge(Node):
             10
         )
 
+        self.create_subscription(
+            Bool,
+            'ready_to_record_rosbag',
+            self.ready_to_record_rosbag_signal_sub,
+            10
+        )
+
+        self.create_subscription(
+            BatteryState,
+            '/mavros/battery',
+            self.battery_callback,
+            qos_profile_sensor_data
+        )
+
+        self.create_timer(2, self.status_report)
+
+        
+
         # --- Nav2 Action Client (Return Home) ---
         self.nav_to_pose_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
 
@@ -60,6 +92,11 @@ class MqttToRosBridge(Node):
         self.is_returning_home = False # Flag to avoid repeated home commands
         self.landed = False
         self.landing_process = None # Track the landing process
+        self.rosbag_process = None # Track the rosbag recording process
+        self.rosbag_folder_name = ""
+        self.home_pose = [0.0,-20.0]
+        self.failed_faces = []
+        self.battery_percentage = None
 
         # --- MQTT Client initialization ---
         self.client = mqtt.Client()
@@ -108,12 +145,10 @@ class MqttToRosBridge(Node):
 
             # 2. Basic information
             ros_msg.task_id = task_data.get("task_id", "")
-            # JSON 範例中沒有 command，給予預設值或保留空字串
-            ros_msg.command = task_data.get("command", "navigate") 
+            ros_msg.rosbag_path = task_data.get("rosbag_path", "") 
             ros_msg.source_timestamp = str(task_data.get("timestamp", ""))
 
-            # 3. Waypoints / Area parsing
-            # 優先檢查是否有 'area' (扁平陣列 [x,y,x,y])
+            # 3. Area parsing [x1,y1,x2,y2,x3,y3,x4,y4]
             if "area" in task_data:
                 area_coords = task_data.get("area", [])
                 # 確保長度是偶數，並且每兩個一組取 (x, y)
@@ -124,20 +159,11 @@ class MqttToRosBridge(Node):
                             wp_msg = Pose2D()
                             wp_msg.x = float(area_coords[i])
                             wp_msg.y = float(area_coords[i+1])
-                            wp_msg.theta = 0.0  # Area 通常只標示範圍，沒有方向，預設為 0
+                            wp_msg.theta = 0.0  # no specific direction
                             ros_msg.waypoints.append(wp_msg)
                             
-            # 相容舊有的 'waypoints' 格式 (物件列表 [{'x':1, 'y':2}])
-            elif "waypoints" in task_data:
-                json_waypoints = task_data.get("waypoints", [])
-                for wp_data in json_waypoints:
-                    wp_msg = Pose2D()
-                    wp_msg.x = float(wp_data.get("x", 0.0))
-                    wp_msg.y = float(wp_data.get("y", 0.0))
-                    wp_msg.theta = float(wp_data.get("yaw", 0.0))
-                    ros_msg.waypoints.append(wp_msg)
 
-        # --- Queue Logic ---
+            # --- Queue Logic ---
             self.task_queue.append(ros_msg)
             self.get_logger().info(f"Queued Task {ros_msg.task_id}. Queue size: {len(self.task_queue)}")
 
@@ -152,16 +178,56 @@ class MqttToRosBridge(Node):
         self.get_logger().info(f"Received Result for Task {msg.task_id}: {msg.result}")
         
         # Mark current processing as done
-        if msg.result == 1: # User stipulated 1 is success? Or maybe logic was inverted?
+        if msg.result == 1 or msg.result == 2:
             # Sticking to user's code edit
             self.is_processing = False
+
+        task_feedback = {
+            "task_id": msg.task_id,
+            "result": msg.result,
+            "failed_faces": list(msg.failed_faces),
+            "timestamp": datetime.now().isoformat()
+        }
         
+        try:
+            payload = json.dumps(task_feedback)
+            self.client.publish(self.feedback_topic, payload)
+            self.get_logger().warn(f"Mission Terminated. Report sent: {payload}")
+        except Exception as e:
+            self.get_logger().error(f"Failed to publish cancellation report: {e}")
+
+        self.record_rosbag("off")
         # Trigger next
         self.process_queue()
+
+    def battery_callback(self, msg):
+        self.battery_percentage = msg.percentage
 
     def is_landed_subscribe(self, msg):
         if msg.data:
             self.precision_landing("off")
+
+    def ready_to_record_rosbag_signal_sub(self, msg):
+        if msg.data:
+            self.record_rosbag("on",path=self.rosbag_folder_name)
+
+    def status_report(self):
+        if self.is_processing:
+            task_status = {
+            "status": "proccesing",
+            "battery": self.battery_percentage
+            }
+        else:
+            task_status = {
+            "status": "idle",
+            "battery": self.battery_percentage
+            }
+        
+        try:
+            payload = json.dumps(task_status)
+            self.client.publish(self.status_topic, payload)
+        except Exception as e:
+            self.get_logger().error(f"Failed to publish cancellation report: {e}")
 
     def process_queue(self):
         """Check queue and publish next task if idle"""
@@ -177,6 +243,7 @@ class MqttToRosBridge(Node):
         next_task = self.task_queue.pop(0)
         self.is_processing = True
         self.current_task = next_task
+        self.rosbag_folder_name = self.current_task.rosbag_path
         self.is_returning_home = False # Ensure we clear this flag if set
         
         # Publish
@@ -200,8 +267,8 @@ class MqttToRosBridge(Node):
         goal_msg.pose.header.frame_id = 'map'
         goal_msg.pose.header.stamp = self.get_clock().now().to_msg()
         # Home Position (0,-20)
-        goal_msg.pose.pose.position.x = 0.0
-        goal_msg.pose.pose.position.y = 0.0
+        goal_msg.pose.pose.position.x = self.home_pose_x
+        goal_msg.pose.pose.position.y = self.home_pose_y
         goal_msg.pose.pose.orientation.w = 1.0
 
         self.get_logger().info("Sending Home Goal...")
@@ -231,17 +298,16 @@ class MqttToRosBridge(Node):
         notification = data.get("notification", "")
         self.get_logger().info(f"Received Notification: {notification}")
         
-        if notification == "all_tasks_finished":
-            self.schedule_shutdown_next_noon()
+        # if notification == "all_tasks_finished":
+        #     self.schedule_shutdown_next_noon()
             
-        elif notification == "suspend":
+        if notification == "suspend":
             self.handle_termination()
 
     def handle_termination(self):
         """Clear queue and report cancelled tasks"""
-        # if not self.task_queue:
-        #     self.get_logger().info("Termination received, but queue is empty.")
-        #     return
+        # Stop recording rosbag
+        self.record_rosbag("off")
 
         # Collect IDs
         cancelled_ids = [task.task_id for task in self.task_queue]
@@ -265,7 +331,7 @@ class MqttToRosBridge(Node):
         
         try:
             payload = json.dumps(report)
-            self.client.publish(self.status_topic, payload)
+            self.client.publish(self.cancelled_topic, payload)
             self.get_logger().warn(f"Mission Terminated. Report sent: {payload}")
         except Exception as e:
             self.get_logger().error(f"Failed to publish cancellation report: {e}")
@@ -309,46 +375,118 @@ class MqttToRosBridge(Node):
         else:
             self.get_logger().warn(f"Unknown action for precision_landing: {action}")
 
-    def schedule_shutdown_next_noon(self):
-        # Calculate duration until Today 18:35
-        now = datetime.now()
-        target_time = now.replace(hour=10, minute=0, second=0, microsecond=0)
+    def record_rosbag(self, action="on", path="defult"):
+        """Record rosbag with On/Off control
+        Usage:
+            self.record_rosbag("on")   # Start recording
+            self.record_rosbag("off")  # Stop recording and save
+        """
+
+        if action == "on":
+            # Check if already recording
+            if self.rosbag_process and self.rosbag_process.poll() is None:
+                self.get_logger().warn("Rosbag is already recording. Ignoring start request.")
+                return
+
+            # Generate timestamped output directory
+            output_dir = f"{self.rosbag_folder_path}/{path}"
+
+            # Example: Record 3 topics (modify as needed)
+            topics = [
+                "/zed/zed_node/rgb/color/rect/camera_info",
+                "/zed/zed_node/rgb/color/rect/image",
+                # "/zed/zed_node/depth/depth_registered",
+                # "/zed/zed_node/depth/camera_info",
+                # "/zed/zed_node/imu/data",
+                "/tf",
+                "/tf_static"
+            ]
+            topics_str = " ".join(topics)
+
+            record_cmd = f"ros2 bag record -o {output_dir} {topics_str}"
+            self.get_logger().info(f"Starting Rosbag Recording: {record_cmd}")
+            try:
+                self.rosbag_process = subprocess.Popen(
+                    record_cmd, shell=True, preexec_fn=os.setsid
+                )
+            except Exception as e:
+                self.get_logger().error(f"Failed to start rosbag recording: {e}")
+
+        elif action == "off":
+            if self.rosbag_process and self.rosbag_process.poll() is None:
+                self.get_logger().info("Stopping Rosbag Recording...")
+                try:
+                    # SIGINT lets ros2 bag flush and save properly
+                    os.killpg(os.getpgid(self.rosbag_process.pid), signal.SIGINT)
+                    self.rosbag_process.wait(timeout=5)
+                    self.get_logger().info("Rosbag Recording stopped and saved.")
+                except subprocess.TimeoutExpired:
+                    os.killpg(os.getpgid(self.rosbag_process.pid), signal.SIGKILL)
+                    self.get_logger().warn("Rosbag Recording killed forcefully.")
+                except Exception as e:
+                    self.get_logger().error(f"Failed to stop rosbag recording: {e}")
+            else:
+                self.get_logger().info("Rosbag Recording is not running.")
+
+        else:
+            self.get_logger().warn(f"Unknown action for record_rosbag: {action}")
+
+    def cleanup_subprocesses(self):
+        """Terminate all child subprocesses to prevent orphan processes."""
+        for name, proc in [("Precision Landing", self.landing_process),
+                           ("Rosbag Recording", self.rosbag_process)]:
+            if proc and proc.poll() is None:
+                self.get_logger().info(f"Cleaning up {name} (PID: {proc.pid})...")
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGINT)
+                    proc.wait(timeout=3)
+                    self.get_logger().info(f"{name} stopped.")
+                except subprocess.TimeoutExpired:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                    self.get_logger().warn(f"{name} killed forcefully.")
+                except Exception as e:
+                    self.get_logger().error(f"Failed to clean up {name}: {e}")
+
+    # def schedule_shutdown_next_noon(self):
+    #     # Calculate duration until Today 18:35
+    #     now = datetime.now()
+    #     target_time = now.replace(hour=10, minute=0, second=0, microsecond=0)
         
-        # If already passed 18:35, schedule for tomorrow 18:35 (or handle as immediate/error? Assuming tomorrow for safety)
-        if target_time < now:
-            target_time += timedelta(days=1)
+    #     # If already passed 18:35, schedule for tomorrow 18:35 (or handle as immediate/error? Assuming tomorrow for safety)
+    #     if target_time < now:
+    #         target_time += timedelta(days=1)
             
-        duration_seconds = (target_time - now).total_seconds()
+    #     duration_seconds = (target_time - now).total_seconds()
         
-        # Set absolute wake timestamp based on current system epoch + duration
-        # This avoids timezone object confusion (UTC vs Local Datetime)
-        wake_timestamp = int(time.time() + duration_seconds)
+    #     # Set absolute wake timestamp based on current system epoch + duration
+    #     # This avoids timezone object confusion (UTC vs Local Datetime)
+    #     wake_timestamp = int(time.time() + duration_seconds)
         
-        self.get_logger().warn(f"Shutdown sequence initiated. System will wake up in {duration_seconds/60:.2f} minutes (Target: {target_time.strftime('%H:%M:%S')})")
+    #     self.get_logger().warn(f"Shutdown sequence initiated. System will wake up in {duration_seconds/60:.2f} minutes (Target: {target_time.strftime('%H:%M:%S')})")
         
-        try:
-            # 1. Set RTC Wake Alarm (Requires sudo/root permissions)
-            # Clear previous alarm
-            cmd_clear = "echo 0 | sudo tee /sys/class/rtc/rtc0/wakealarm"
-            subprocess.run(cmd_clear, shell=True, check=True)
+    #     try:
+    #         # 1. Set RTC Wake Alarm (Requires sudo/root permissions)
+    #         # Clear previous alarm
+    #         cmd_clear = "echo 0 | sudo tee /sys/class/rtc/rtc0/wakealarm"
+    #         subprocess.run(cmd_clear, shell=True, check=True)
             
-            # Set new alarm
-            cmd_set = f"echo {wake_timestamp} | sudo tee /sys/class/rtc/rtc0/wakealarm"
-            subprocess.run(cmd_set, shell=True, check=True)
+    #         # Set new alarm
+    #         cmd_set = f"echo {wake_timestamp} | sudo tee /sys/class/rtc/rtc0/wakealarm"
+    #         subprocess.run(cmd_set, shell=True, check=True)
             
-            self.get_logger().info("RTC Wake Alarm set successfully.")
+    #         self.get_logger().info("RTC Wake Alarm set successfully.")
             
-            # 2. Countdown and Suspend (Sleep Mode)
-            self.get_logger().warn("System suspending (sleep mode) in 5 seconds...")
-            time.sleep(5)
+    #         # 2. Countdown and Suspend (Sleep Mode)
+    #         self.get_logger().warn("System suspending (sleep mode) in 5 seconds...")
+    #         time.sleep(5)
             
-            # Use 'systemctl suspend' instead of 'shutdown'
-            subprocess.run("sudo systemctl suspend", shell=True, check=True)
+    #         # Use 'systemctl suspend' instead of 'shutdown'
+    #         subprocess.run("sudo systemctl suspend", shell=True, check=True)
             
-        except subprocess.CalledProcessError as e:
-            self.get_logger().error(f"System command failed: {e}. Check sudo permissions.")
-        except Exception as e:
-            self.get_logger().error(f"Shutdown failed: {e}")
+    #     except subprocess.CalledProcessError as e:
+    #         self.get_logger().error(f"System command failed: {e}. Check sudo permissions.")
+    #     except Exception as e:
+    #         self.get_logger().error(f"Shutdown failed: {e}")
 
 def main(args=None):
     rclpy.init(args=args)
@@ -358,6 +496,7 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
+        node.cleanup_subprocesses()
         node.client.loop_stop()
         node.client.disconnect()
         node.destroy_node()
