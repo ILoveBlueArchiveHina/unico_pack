@@ -11,6 +11,7 @@ from action_msgs.msg import GoalStatus
 from campus_delivery_msgs.msg import NavTask, NavResult  # My custom messages
 from nav2_msgs.action import FollowWaypoints # Nav2 Actions
 from geometry_msgs.msg import PoseStamped, Twist    # Nav2 target pose message type
+from std_msgs.msg import Bool
 
 class Nav2Executor(Node):
 
@@ -31,6 +32,12 @@ class Nav2Executor(Node):
             NavResult,
             'navigation_result',
             10)
+        
+        self.ready_to_record_rosbag_pub = self.create_publisher(
+            Bool,
+            'ready_to_record_rosbag',
+            10
+        )
 
         # 2. Create Nav2 Action Client
         self._action_client = ActionClient(self, FollowWaypoints, 'follow_waypoints', callback_group=self.callback_group)
@@ -60,21 +67,18 @@ class Nav2Executor(Node):
         self.cargo_queue = [] # Queue for sequential cargo legs
         self.current_leg_index = 0 # Track which leg we are on (1-4)
         self.failed_faces = [] # Store which faces failed sampling
+        self.expanded_points = [] # All 4 expanded starting points
+        self.current_start_index = 0 # Which starting point we are trying
 
     def listener_callback(self, msg):
         """Receive task from MQTT Bridge and call Nav2"""
         self.get_logger().info(f"Received Task ID: {msg.task_id} with {len(msg.waypoints)} points")
         self.task_id = msg.task_id
 
-        # Call processing function
-        self.send_goal_to_nav2(msg.waypoints)
-
-    def send_goal_to_nav2(self, waypoints_data):
-        # Check for 4-waypoint cargo task
-        if len(waypoints_data) == 4:
-             self.handle_cargo_task(waypoints_data)
+        if len(msg.waypoints) == 4:
+             self.handle_cargo_task(msg.waypoints)
         else:
-             self.handle_standard_task(waypoints_data)
+            self.get_logger().warn(f'Refuse to execute a task with {len(msg.waypoints)} waypoints.')
 
     def handle_cargo_task(self, waypoints_data):
         """Handle 4-waypoint cargo inspection with loop expansion"""
@@ -86,7 +90,7 @@ class Nav2Executor(Node):
         
         self.get_logger().info(f"Cargo Task Detected! Deep Inspection Mode. Center: ({self.center_x:.2f}, {self.center_y:.2f})")
         
-        # 1. Expand corners by 1.0m
+        # 1. Expand corners
         expanded_points = []
         for i in range(4):
             dx = xs[i] - self.center_x
@@ -101,8 +105,8 @@ class Nav2Executor(Node):
                 ux, uy = 0, 0
                 
             # New point = Old Point + 1.0m outward
-            new_x = xs[i] + ux * 1.5
-            new_y = ys[i] + uy * 1.5
+            new_x = xs[i] + ux * 2.0
+            new_y = ys[i] + uy * 2.0
             expanded_points.append((new_x, new_y))
             
         # 2. Generate legs (faces) logic: Corner -> NextCorner
@@ -118,21 +122,33 @@ class Nav2Executor(Node):
             
         self.get_logger().info(f"Generated {len(self.cargo_queue)} inspection legs. Starting execution...")
         
-        # Phase 1: Approach the first point (expanded_points[0])
-        start_pose_x = expanded_points[0][0]
-        start_pose_y = expanded_points[0][1]
-        self.start_approach(start_pose_x, start_pose_y)
+        # Phase 1: Approach the first point (try each expanded point on failure)
+        self.expanded_points = expanded_points
+        self.current_start_index = 0
+        self.try_next_start_point()
+
+    def try_next_start_point(self):
+        """Try approaching the next available starting point. Fail task if all exhausted."""
+        if self.current_start_index >= len(self.expanded_points):
+            self.get_logger().error('All 4 starting points failed! Reporting task failure.')
+            self.finish_task(success=False)
+            return
+
+        idx = self.current_start_index
+        x, y = self.expanded_points[idx]
+        self.get_logger().info(
+            f"Phase 1: Trying start point {idx+1}/{len(self.expanded_points)} ({x:.2f}, {y:.2f})...")
+        self.start_approach(x, y)
 
     def start_approach(self, x, y):
         """Phase 1: Navigate to the starting corner"""
-        self.get_logger().info(f"Phase 1: Approaching start point ({x:.2f}, {y:.2f})...")
-        
         goal_msg = FollowWaypoints.Goal()
         goal_msg.poses = [self.create_pose(x, y)]
         
         if not self._action_client.wait_for_server(timeout_sec=5.0):
             self.get_logger().error('Nav2 Action Server not available for approach!')
-            self.finish_task(success=False)
+            self.current_start_index += 1
+            self.try_next_start_point()
             return
             
         future = self._action_client.send_goal_async(goal_msg)
@@ -141,8 +157,10 @@ class Nav2Executor(Node):
     def approach_response_callback(self, future):
         goal_handle = future.result()
         if not goal_handle.accepted:
-            self.get_logger().error('Approach goal rejected!')
-            self.finish_task(success=False)
+            self.get_logger().warn(
+                f'Approach goal rejected for start point {self.current_start_index+1}/{len(self.expanded_points)}, trying next...')
+            self.current_start_index += 1
+            self.try_next_start_point()
             return
             
         self.get_logger().info('Approach goal accepted.')
@@ -151,13 +169,24 @@ class Nav2Executor(Node):
 
     def approach_result_callback(self, future):
         result = future.result().result
+        self.cmd_pub.publish(Twist())  # brakes
         if len(result.missed_waypoints) == 0:
-             self.get_logger().info('Phase 1: Approach Complete. Starting Phase 2: Inspection Loop.')
-             self.current_leg_index = 0
-             self.process_next_cargo_leg()
+            self.get_logger().info('Phase 1: Approach Complete. Starting Phase 2: Inspection Loop.')
+            # Rotate cargo_queue so inspection legs start from the successful point
+            rotate_count = 0
+            self.current_start_index = 0
+            if rotate_count > 0 and self.cargo_queue:
+                self.cargo_queue = self.cargo_queue[rotate_count:] + self.cargo_queue[:rotate_count]
+            self.current_leg_index = 0
+            ros_msg = Bool()
+            ros_msg.data = True
+            self.ready_to_record_rosbag_pub.publish(ros_msg)
+            self.process_next_cargo_leg()
         else:
-             self.get_logger().warn('Phase 1: Approach Failed.')
-             self.finish_task(success=False)
+            self.get_logger().warn(
+                f'Phase 1: Approach failed for start point {self.current_start_index+1}/{len(self.expanded_points)}, trying next...')
+            self.current_start_index += 1
+            self.try_next_start_point()
 
     def create_pose(self, x, y):
         pose = PoseStamped()
@@ -168,11 +197,16 @@ class Nav2Executor(Node):
         pose.pose.orientation.w = 1.0 # Default orientation, will be overridden by tracker
         return pose
 
-    def process_next_cargo_leg(self):
+    def process_next_cargo_leg(self, failed_faces=None):
         """Execute next leg in the queue"""
         if not self.cargo_queue:
             self.get_logger().info("All cargo legs completed!")
-            self.finish_task(success=True)
+            if failed_faces:
+                success=False
+            else:
+                success=True
+
+            self.finish_task(success=success, failed_faces=failed_faces)
             return
             
         current_leg_points = self.cargo_queue.pop(0)
@@ -203,6 +237,7 @@ class Nav2Executor(Node):
 
     def cargo_leg_result_callback(self, future):
         result = future.result().result
+        self.cmd_pub.publish(Twist())  # brakes
         
         # Check missed waypoints
         # The goal had 1 point: [0: End]
@@ -210,28 +245,25 @@ class Nav2Executor(Node):
         
         # Check if Endpoint (Index 0) was missed
         if 0 in missed:
-             self.get_logger().warn(f"Face {self.current_leg_index} Endpoint unreachable.")
+            self.get_logger().warn(f"Face {self.current_leg_index} Endpoint unreachable.")
+            self.failed_faces.append(self.current_leg_index)  # store failed cargo face
              
         # Continue to next leg
-        self.process_next_cargo_leg()
+        self.process_next_cargo_leg(failed_faces=self.failed_faces)
 
-    def finish_task(self, success):
+    def finish_task(self, success, failed_faces=None):
         self.tracking_active = False
         result_msg = NavResult()
         result_msg.header.stamp = self.get_clock().now().to_msg()
         result_msg.header.frame_id = "map"
         result_msg.task_id = self.task_id
+        result_msg.failed_faces = failed_faces
         
         # Logic: If Phase 1 (success arg) failed, return 1.
         # If Phase 1 succeeded, check if any sampling failed during Phase 2.
         if not success:
-             result_msg.result = 1 # Approach failed or generic
+             result_msg.result = 2 # Approach failed or generic
              self.get_logger().warn('Task Failed (Approach or Generic).')
-        elif self.failed_faces:
-             # Report the first failed face
-             first_fail = self.failed_faces[0]
-             result_msg.message = f"Failed to sample depth data on cargo face {first_fail}"
-             self.get_logger().warn(f'Task Completed with Sampling Failures. First Fail: Face {first_fail}')
         else:
              result_msg.result = 1
              self.get_logger().info('Task Completed Successfully!')
@@ -239,33 +271,32 @@ class Nav2Executor(Node):
         self.pub.publish(result_msg)
         self.cmd_pub.publish(Twist())
 
-    def goal_response_callback(self, future):
-        goal_handle = future.result()
-        if not goal_handle.accepted:
-            self.get_logger().info('Goal rejected :(')
-            return
+    # def goal_response_callback(self, future):
+    #     goal_handle = future.result()
+    #     if not goal_handle.accepted:
+    #         self.get_logger().info('Goal rejected :(')
+    #         return
 
-        self.get_logger().info('Goal accepted! UAV is moving.')
-        result_msg = NavResult()
-        result_msg.header.stamp = self.get_clock().now().to_msg()
-        result_msg.header.frame_id = "map"
-        result_msg.task_id = self.task_id
-        result_msg.result = 0
-        result_msg.message = "mission accepted"
-        self.pub.publish(result_msg)
-        # Attach result_callback to know when navigation is complete
-        self._get_result_future = goal_handle.get_result_async()
-        self._get_result_future.add_done_callback(self.get_result_callback)
+    #     self.get_logger().info('Goal accepted! UAV is moving.')
+    #     result_msg = NavResult()
+    #     result_msg.header.stamp = self.get_clock().now().to_msg()
+    #     result_msg.header.frame_id = "map"
+    #     result_msg.task_id = self.task_id
+    #     result_msg.result = 0
+    #     self.pub.publish(result_msg)
+    #     # Attach result_callback to know when navigation is complete
+    #     self._get_result_future = goal_handle.get_result_async()
+    #     self._get_result_future.add_done_callback(self.get_result_callback)
 
-    def get_result_callback(self, future):
-        """Callback after navigation is complete"""
-        result = future.result().result
-        # FollowWaypoints result usually contains missed_waypoints
-        if len(result.missed_waypoints) == 0:
-             self.finish_task(success=True)
-        else:
-             self.get_logger().warn(f'Task Finished but missed {len(result.missed_waypoints)} waypoints.')
-             self.finish_task(success=False)
+    # def get_result_callback(self, future):
+    #     """Callback after navigation is complete"""
+    #     result = future.result().result
+    #     # FollowWaypoints result usually contains missed_waypoints
+    #     if len(result.missed_waypoints) == 0:
+    #          self.finish_task(success=True)
+    #     else:
+    #          self.get_logger().warn(f'Task Finished but missed {len(result.missed_waypoints)} waypoints.')
+    #          self.finish_task(success=False)
 
     def cmd_vel_callback(self, msg):
         """Intercept Nav2 cmd_vel and override angular velocity if tracking"""
