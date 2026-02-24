@@ -1,5 +1,5 @@
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, TimerAction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -59,22 +59,9 @@ def generate_launch_description():
             output='screen',
             parameters=[params_file, {'use_sim_time': use_sim_time}]
         ),
-        # bt navigator
-        Node(
-            package='nav2_bt_navigator',
-            executable='bt_navigator',
-            name='bt_navigator',
-            output='screen',
-            parameters=[params_file, {'use_sim_time': use_sim_time}]
-        ),
-        # waypoint follower
-        Node(
-            package='nav2_waypoint_follower',
-            executable='waypoint_follower',
-            name='waypoint_follower',
-            output='screen',
-            parameters=[params_file, {'use_sim_time': use_sim_time}]
-        ),
+        
+        
+        
         # velocity_smoother
         # Node(
         #     package='nav2_velocity_smoother',
@@ -84,42 +71,78 @@ def generate_launch_description():
         #     parameters=[params_file, {'use_sim_time': use_sim_time}]
         # ),
 
-        Node(
-            package='nav2_map_server',
-            executable='map_server',
-            name='map_server',
-            output='screen',
-            parameters=[{
-                'use_sim_time': use_sim_time,
-                'yaml_filename': map_file,
-            }]
-        ),
+        
 
-        # lifecycle manager
-        Node(
-            package='nav2_lifecycle_manager',
-            executable='lifecycle_manager',
-            name='lifecycle_manager_navigation',
-            output='screen',
-            parameters=[{
-                'use_sim_time': use_sim_time,
-                'autostart': True,
-                'node_names': [
-                    'controller_server',
-                    # 'smoother_server',
-                    'planner_server',
-                    'behavior_server',
-                    'bt_navigator',
-                    'waypoint_follower',
-                    # 'velocity_smoother',
-                    'map_server',
-                ]
-            }]
-        ),
-        Node(
-            package='unico_pack',
-            executable='cmd_vel_bridge.py',
-        ),
+        
     ]
 
-    return LaunchDescription([declare_params, declare_sim, declare_map] + nodes)
+    delayed_nodes = TimerAction(
+        period=3.0,
+        actions=[
+            Node(
+                package='unico_pack',
+                executable='cmd_vel_bridge.py',
+            ),
+
+
+            # waypoint follower
+            Node(
+                package='nav2_waypoint_follower',
+                executable='waypoint_follower',
+                name='waypoint_follower',
+                output='screen',
+                parameters=[params_file, {'use_sim_time': use_sim_time}]
+            ),
+
+            # bt navigator
+            Node(
+                package='nav2_bt_navigator',
+                executable='bt_navigator',
+                name='bt_navigator',
+                output='screen',
+                parameters=[params_file, {'use_sim_time': use_sim_time}]
+            ),
+            
+        ]
+    )
+
+    lifecycle_manager = TimerAction(
+        period=5.0,
+        actions=[
+            # map server
+            Node(
+                package='nav2_map_server',
+                executable='map_server',
+                name='map_server',
+                output='screen',
+                parameters=[{
+                    'use_sim_time': use_sim_time,
+                    'yaml_filename': map_file,
+                }]
+            ),
+
+            Node(
+                package='nav2_lifecycle_manager',
+                executable='lifecycle_manager',
+                name='lifecycle_manager_navigation',
+                output='screen',
+                parameters=[{
+                    'use_sim_time': use_sim_time,
+                    'autostart': True,
+                    'node_names': [
+                        'controller_server',
+                        # 'smoother_server',
+                        'planner_server',
+                        'behavior_server',
+                        'bt_navigator',
+                        'waypoint_follower',
+                        # 'velocity_smoother',
+                        'map_server',
+                    ]
+                }]
+            )
+        ]
+    )
+    
+
+    return LaunchDescription([declare_params, declare_sim, declare_map] + nodes + [delayed_nodes] + [lifecycle_manager])

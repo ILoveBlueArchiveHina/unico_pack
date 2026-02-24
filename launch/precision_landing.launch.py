@@ -1,5 +1,6 @@
 from launch import LaunchDescription
 from launch_ros.actions import Node
+from launch.actions import TimerAction
 
 def generate_launch_description():
     return LaunchDescription([
@@ -12,7 +13,7 @@ def generate_launch_description():
                 'image_width': 1920,
                 'image_height': 1080,
                 'pixel_format': 'mjpeg2rgb',
-                'framerate': 15.0,
+                'framerate': 10.0,
                 'camera_info_url': 'file:///home/uni-co-jetson/ros2_ws/src/unico_pack/config/webcam_param.yaml',
                 'frame_id': "camera",
                 'camera_name': 'webcam'
@@ -24,29 +25,51 @@ def generate_launch_description():
         ),
         
         # ArUco多標記識別節點
-        Node(
-            package='aruco_ros',
-            executable='marker_publisher', 
-            parameters=[{
-                'marker_size': 0.03,  # cm
-                'reference_frame': 'camera',
-                'camera_frame': 'camera',
-            }],
-            remappings=[
-                ('camera_info', 'webcam/camera_info'),
-                ('image', 'webcam/image_raw')
+        TimerAction(
+            period=5.0,
+            actions=[
+                Node(
+                    package='aruco_ros',
+                    executable='marker_publisher', 
+                    parameters=[{
+                        'marker_size': 0.03,  # cm
+                        'reference_frame': 'camera',
+                        'camera_frame': 'camera',
+                    }],
+                    remappings=[
+                        ('camera_info', 'webcam/camera_info'),
+                        ('image', 'webcam/image_raw')
+                    ]
+                ),
+
+                # 多標記降落控制節點
+                Node(
+                    package='unico_pack',
+                    executable='multi_marker_landing_v3.py',
+                ),
+                # 多標記降落控制節點
+                Node(
+                    package='unico_pack',
+                    executable='cmd_vel_bridge.py',
+                ),
             ]
         ),
         
-        # 多標記降落控制節點
-        # Node(
-        #     package='unico_pack',
-        #     executable='multi_marker_landing_v3.py',
-        # ),
-        # 多標記降落控制節點
-        Node(
-            package='unico_pack',
-            executable='cmd_vel_bridge.py',
-        ),
+        TimerAction(
+            period=8.0,
+            actions=[
+                # 多標記降落控制節點
+                Node(
+                    package='unico_pack',
+                    executable='multi_marker_landing_v3.py',
+                ),
+                # 多標記降落控制節點
+                Node(
+                    package='unico_pack',
+                    executable='cmd_vel_bridge.py',
+                ),
+            ]
+        )
+        
     ])
     

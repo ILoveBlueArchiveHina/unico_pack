@@ -34,10 +34,10 @@ class MqttToRosBridge(Node):
         self.rosbag_folder_path = self.get_parameter("rosbag_folder_path").value
 
         # --- MQTT ROS 2 bridge topics ---
-        self.mqtt_broker = "broker.emqx.io"
-        self.nav_topic = "uav/navigation/tasks"
+        self.mqtt_broker = "192.168.166.83"
+        self.nav_topic = "warehouse/task/request"
         self.notification_topic = "warehouse/task/notification"
-        self.cancelled_topic = "warehouse/task/remaining" # Topic for reporting back to server
+        self.cancelled_topic = "warehouse/task/cancelled" # Topic for reporting back to server
         self.status_topic = "warehouse/task/status"
         self.feedback_topic = "warehouse/task/feedback"
         self.ros_topic = "navigation_tasks" # Republished ROS topic name
@@ -94,7 +94,6 @@ class MqttToRosBridge(Node):
         self.landing_process = None # Track the landing process
         self.rosbag_process = None # Track the rosbag recording process
         self.rosbag_folder_name = ""
-        self.home_pose = [0.0,-20.0]
         self.failed_faces = []
         self.battery_percentage = None
 
@@ -212,17 +211,21 @@ class MqttToRosBridge(Node):
             self.record_rosbag("on",path=self.rosbag_folder_name)
 
     def status_report(self):
-        if self.is_processing:
-            task_status = {
-            "status": "proccesing",
-            "battery": self.battery_percentage
-            }
-        else:
-            task_status = {
-            "status": "idle",
-            "battery": self.battery_percentage
-            }
-        
+        try:
+            if self.is_processing:
+                task_status = {
+                "status": "proccesing",
+                "battery": self.battery_percentage
+                }
+            else:
+                task_status = {
+                "status": "idle",
+                "battery": self.battery_percentage
+                }
+                
+        except Exception as e:
+            self.get_logger().error(f"failed to get battery msg")
+            
         try:
             payload = json.dumps(task_status)
             self.client.publish(self.status_topic, payload)
@@ -347,7 +350,7 @@ class MqttToRosBridge(Node):
                 self.get_logger().warn("Precision Landing is already running. Ignoring start request.")
                 return
 
-            launch_cmd = "ros2 launch unico_pack precision_landing_sitl.launch.py"
+            launch_cmd = "ros2 launch unico_pack precision_landing.launch.py"
             self.landed = True # Set flag (logic depends on usage)
             self.get_logger().info(f"Starting Precision Landing: {launch_cmd}")
             try:
@@ -395,9 +398,9 @@ class MqttToRosBridge(Node):
             topics = [
                 "/zed/zed_node/rgb/color/rect/camera_info",
                 "/zed/zed_node/rgb/color/rect/image",
-                # "/zed/zed_node/depth/depth_registered",
-                # "/zed/zed_node/depth/camera_info",
-                # "/zed/zed_node/imu/data",
+                "/zed/zed_node/depth/depth_registered",
+                "/zed/zed_node/depth/camera_info",
+                "/zed/zed_node/imu/data",
                 "/tf",
                 "/tf_static"
             ]
