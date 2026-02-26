@@ -96,6 +96,7 @@ class MqttToRosBridge(Node):
         self.rosbag_folder_name = ""
         self.failed_faces = []
         self.battery_percentage = None
+        self.ready = False  # Startup protection: ignore messages until ready
 
         # --- MQTT Client initialization ---
         self.client = mqtt.Client()
@@ -109,6 +110,15 @@ class MqttToRosBridge(Node):
         except Exception as e:
             self.get_logger().error(f"Cannot connect to MQTT: {e}")
 
+        # Startup protection: wait 3 seconds before accepting tasks
+        self.create_timer(3.0, self._set_ready)
+
+    def _set_ready(self):
+        """Called once after startup delay to begin accepting tasks."""
+        if not self.ready:
+            self.ready = True
+            self.get_logger().info("Manager is now ready to accept tasks.")
+
     def on_connect(self, client, userdata, flags, rc):
         client.subscribe(self.nav_topic)
         client.subscribe(self.notification_topic)
@@ -116,6 +126,10 @@ class MqttToRosBridge(Node):
 
     def on_message(self, client, userdata, msg):
         """Receive MQTT message -> Transform -> Publishing ROS Topic or Action"""
+        if not self.ready:
+            self.get_logger().warn(f"Ignoring message on {msg.topic} (not ready yet, may be retained message)")
+            return
+
         try:
             payload_str = msg.payload.decode('utf-8')
             data = json.loads(payload_str)
@@ -195,7 +209,7 @@ class MqttToRosBridge(Node):
         except Exception as e:
             self.get_logger().error(f"Failed to publish cancellation report: {e}")
 
-        self.record_rosbag("off")
+        # self.record_rosbag("off")
         # Trigger next
         self.process_queue()
 
@@ -208,7 +222,8 @@ class MqttToRosBridge(Node):
 
     def ready_to_record_rosbag_signal_sub(self, msg):
         if msg.data:
-            self.record_rosbag("on",path=self.rosbag_folder_name)
+            # self.record_rosbag("on",path=self.rosbag_folder_name)
+            self.get_logger().info(f"start to record rosbag(debug)")
 
     def status_report(self):
         try:
@@ -293,7 +308,7 @@ class MqttToRosBridge(Node):
     def home_result_callback(self, future):
         result = future.result().result
         self.get_logger().info("Arrived at Home (or action finished).")
-        self.precision_landing("on")
+        # self.precision_landing("on")
         self.is_processing = False
         self.is_returning_home = False
 
@@ -310,7 +325,7 @@ class MqttToRosBridge(Node):
     def handle_termination(self):
         """Clear queue and report cancelled tasks"""
         # Stop recording rosbag
-        self.record_rosbag("off")
+        # self.record_rosbag("off")
 
         # Collect IDs
         cancelled_ids = [task.task_id for task in self.task_queue]

@@ -14,7 +14,7 @@ def generate_launch_description():
                 'image_height': 1080,
                 'pixel_format': 'mjpeg2rgb',
                 'framerate': 10.0,
-                'camera_info_url': 'file:///home/uni-co-jetson/ros2_ws/src/unico_pack/config/webcam_param.yaml',
+                'camera_info_url': 'file:///home/uni-co-jetson/ros2_ws/src/unico_pack/config/webcam720.yaml',
                 'frame_id': "camera",
                 'camera_name': 'webcam'
             }],

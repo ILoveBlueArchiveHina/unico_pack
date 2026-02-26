@@ -77,7 +77,7 @@ def generate_launch_description():
     ]
 
     delayed_nodes = TimerAction(
-        period=3.0,
+        period=4.0,
         actions=[
             Node(
                 package='unico_pack',
@@ -107,7 +107,7 @@ def generate_launch_description():
     )
 
     lifecycle_manager = TimerAction(
-        period=5.0,
+        period=8.0,
         actions=[
             # map server
             Node(

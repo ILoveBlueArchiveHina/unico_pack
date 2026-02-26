@@ -252,6 +252,8 @@ class Nav2Executor(Node):
         self.process_next_cargo_leg(failed_faces=self.failed_faces)
 
     def finish_task(self, success, failed_faces=None):
+        if failed_faces is None:
+            failed_faces = []
         self.tracking_active = False
         result_msg = NavResult()
         result_msg.header.stamp = self.get_clock().now().to_msg()
