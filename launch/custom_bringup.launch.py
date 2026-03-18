@@ -31,8 +31,7 @@ def generate_launch_description():
     )
 
     nodes = [
-        # 全域規劃
-        Node(
+    Node(
             package='nav2_planner',
             executable='planner_server',
             name='planner_server',
@@ -40,8 +39,11 @@ def generate_launch_description():
             parameters=[params_file, {'use_sim_time': use_sim_time}],
             prefix=['nice -n 10 '],
         ),
-        # controller
-        Node(
+
+    TimerAction(
+        period = 3.0,
+        actions = [
+            Node(
             package='nav2_controller',
             executable='controller_server',
             name='controller_server',
@@ -51,52 +53,25 @@ def generate_launch_description():
                 ('cmd_vel', 'cmd_vel_nav'),
             ],
             prefix=['nice -n 10 '],
-        ),
-        # smoother
-        # Node(
-        #     package='nav2_smoother',
-        #     executable='smoother_server',
-        #     name='smoother_server',
-        #     output='screen',
-        #     parameters=[params_file, {'use_sim_time': use_sim_time}]
-        # ),
-        # behaviors（spin / backup / drive_on_heading / wait）
-        Node(
+        )]
+    ),
+
+    TimerAction(
+        period = 6.0,
+        actions = [
+            Node(
             package='nav2_behaviors',
             executable='behavior_server',
             name='behavior_server',
             output='screen',
             parameters=[params_file, {'use_sim_time': use_sim_time}],
             prefix=['nice -n 10 '],
-        ),
-        
-        
-        
-        # velocity_smoother
-        # Node(
-        #     package='nav2_velocity_smoother',
-        #     executable='velocity_smoother',
-        #     name='velocity_smoother',
-        #     output='screen',
-        #     parameters=[params_file, {'use_sim_time': use_sim_time}]
-        # ),
+        )]
+    ),
 
-        
-
-        
-    ]
-
-    delayed_nodes = TimerAction(
-        period=4.0,
+    TimerAction(
+        period=9.0,
         actions=[
-            Node(
-                package='unico_pack',
-                executable='cmd_vel_bridge.py',
-                prefix=['nice -n 10 '],
-            ),
-
-
-            # waypoint follower
             Node(
                 package='nav2_waypoint_follower',
                 executable='waypoint_follower',
@@ -104,9 +79,12 @@ def generate_launch_description():
                 output='screen',
                 parameters=[params_file, {'use_sim_time': use_sim_time}],
                 prefix=['nice -n 10 '],
-            ),
+            )]
+    ),
 
-            # bt navigator
+    TimerAction(
+        period = 12.0,
+        actions = [
             Node(
                 package='nav2_bt_navigator',
                 executable='bt_navigator',
@@ -114,19 +92,26 @@ def generate_launch_description():
                 output='screen',
                 parameters=[params_file, {
                     'use_sim_time': use_sim_time,
-                    'default_nav_to_pose_bt_xml': PathJoinSubstitution(["/home/", user, "/ros2_ws/src/unico_pack/config/drone_nav.xml"]),
-                    'default_nav_through_poses_bt_xml': PathJoinSubstitution(["/home/", user, "/ros2_ws/src/unico_pack/config/drone_nav_through_poses.xml"])
+                    'default_nav_to_pose_bt_xml': PathJoinSubstitution(["/home", user, "ros2_ws/src/unico_pack/config/drone_nav.xml"]),
+                    'default_nav_through_poses_bt_xml': PathJoinSubstitution(["/home", user, "ros2_ws/src/unico_pack/config/drone_nav_through_poses.xml"])
                     }],
                 prefix=['nice -n 10 '],
-            ),
-            
-        ]
-    )
+            )]
+    ),
 
-    lifecycle_manager = TimerAction(
-        period=8.0,
-        actions=[
-            # map server
+    TimerAction(
+        period = 15.0,
+        actions = [
+            Node(
+                package='unico_pack',
+                executable='cmd_vel_bridge.py',
+                prefix=['nice -n 10 '],
+            )]
+    ),
+
+    TimerAction(
+        period = 18.0,
+        actions = [
             Node(
                 package='nav2_map_server',
                 executable='map_server',
@@ -137,8 +122,13 @@ def generate_launch_description():
                     'yaml_filename': map_file,
                 }],
                 prefix=['nice -n 10 '],
-            ),
+            )]
+    )
+    ]
 
+    lifecycle_manager = TimerAction(
+        period=21.0,
+        actions=[
             Node(
                 package='nav2_lifecycle_manager',
                 executable='lifecycle_manager',
@@ -157,10 +147,11 @@ def generate_launch_description():
                         # 'velocity_smoother',
                         'map_server',
                     ]
-                }]
+                }],
+                prefix=['nice -n 10 '],
             )
         ]
     )
     
 
-    return LaunchDescription([declare_params, declare_sim, declare_map, declare_user] + nodes + [delayed_nodes] + [lifecycle_manager])
+    return LaunchDescription([declare_params, declare_sim, declare_map, declare_user] + nodes + [lifecycle_manager])

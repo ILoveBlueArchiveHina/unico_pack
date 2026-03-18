@@ -1,0 +1,26 @@
+image_width: 1280
+image_height: 720
+camera_name: landing_cam
+camera_matrix:
+  rows: 3
+  cols: 3
+  data: [474.91018,   0.     , 631.17909,
+           0.     , 473.41183, 374.01265,
+           0.     ,   0.     ,   1.     ]
+distortion_model: plumb_bob
+distortion_coefficients:
+  rows: 1
+  cols: 5
+  data: [0.025072, -0.029213, 0.005093, -0.001927, 0.000000]
+rectification_matrix:
+  rows: 3
+  cols: 3
+  data: [1., 0., 0.,
+         0., 1., 0.,
+         0., 0., 1.]
+projection_matrix:
+  rows: 3
+  cols: 4
+  data: [474.53915,   0.     , 630.68595,   0.     ,
+           0.     , 476.64008, 376.56309,   0.     ,
+           0.     ,   0.     ,   1.     ,   0.     ]

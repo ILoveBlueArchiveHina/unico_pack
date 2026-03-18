@@ -10,8 +10,6 @@ bt_navigator:
     
     # 【關鍵修改 1】指定自定義的無人機專用 XML 路徑
     # 請將此路徑改為您實際存放 XML 的位置 (例如您的 package 內)
-    default_nav_to_pose_bt_xml: "/home/uni-co-jetson/ros2_ws/src/unico_pack/config/drone_nav.xml"
-    default_nav_through_poses_bt_xml: "/home/uni-co-jetson/ros2_ws/src/unico_pack/config/drone_nav_through_poses.xml"
     
     plugin_lib_names:
       - nav2_compute_path_to_pose_action_bt_node

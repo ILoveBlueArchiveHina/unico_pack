@@ -11,7 +11,7 @@ def generate_launch_description():
                 'video_device': '/dev/video0',
                 'image_width': 1280,
                 'image_height': 720,
-                'pixel_format': 'mjpeg2rgb',
+                'pixel_format': 'grey',
                 'framerate': 10.0,
                 'frame_id': "camera",
                 'camera_name': 'webcam'
@@ -20,6 +20,18 @@ def generate_launch_description():
                 ('image_raw', 'webcam/image_raw'),
                 ('camera_info', 'webcam/camera_info')
             ]
+        ),
+
+        Node(
+            package="camera_calibration",
+            executable="cameracalibrator",
+            arguments=['--size', '7x9', '--square', '0.02'],
+            remappings=[
+                ('image', '/webcam/image_raw'),
+            ],
+            parameters=[{
+                'camera': '/webcam',
+            }]
         )
         
     ])
