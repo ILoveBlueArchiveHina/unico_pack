@@ -465,47 +465,6 @@ class MqttToRosBridge(Node):
                 except Exception as e:
                     self.get_logger().error(f"Failed to clean up {name}: {e}")
 
-    # def schedule_shutdown_next_noon(self):
-    #     # Calculate duration until Today 18:35
-    #     now = datetime.now()
-    #     target_time = now.replace(hour=10, minute=0, second=0, microsecond=0)
-        
-    #     # If already passed 18:35, schedule for tomorrow 18:35 (or handle as immediate/error? Assuming tomorrow for safety)
-    #     if target_time < now:
-    #         target_time += timedelta(days=1)
-            
-    #     duration_seconds = (target_time - now).total_seconds()
-        
-    #     # Set absolute wake timestamp based on current system epoch + duration
-    #     # This avoids timezone object confusion (UTC vs Local Datetime)
-    #     wake_timestamp = int(time.time() + duration_seconds)
-        
-    #     self.get_logger().warn(f"Shutdown sequence initiated. System will wake up in {duration_seconds/60:.2f} minutes (Target: {target_time.strftime('%H:%M:%S')})")
-        
-    #     try:
-    #         # 1. Set RTC Wake Alarm (Requires sudo/root permissions)
-    #         # Clear previous alarm
-    #         cmd_clear = "echo 0 | sudo tee /sys/class/rtc/rtc0/wakealarm"
-    #         subprocess.run(cmd_clear, shell=True, check=True)
-            
-    #         # Set new alarm
-    #         cmd_set = f"echo {wake_timestamp} | sudo tee /sys/class/rtc/rtc0/wakealarm"
-    #         subprocess.run(cmd_set, shell=True, check=True)
-            
-    #         self.get_logger().info("RTC Wake Alarm set successfully.")
-            
-    #         # 2. Countdown and Suspend (Sleep Mode)
-    #         self.get_logger().warn("System suspending (sleep mode) in 5 seconds...")
-    #         time.sleep(5)
-            
-    #         # Use 'systemctl suspend' instead of 'shutdown'
-    #         subprocess.run("sudo systemctl suspend", shell=True, check=True)
-            
-    #     except subprocess.CalledProcessError as e:
-    #         self.get_logger().error(f"System command failed: {e}. Check sudo permissions.")
-    #     except Exception as e:
-    #         self.get_logger().error(f"Shutdown failed: {e}")
-
 def main(args=None):
     rclpy.init(args=args)
     node = MqttToRosBridge()

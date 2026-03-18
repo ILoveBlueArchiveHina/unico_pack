@@ -1,12 +1,14 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, TimerAction
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 
 def generate_launch_description():
     params_file = LaunchConfiguration('params_file')
     use_sim_time = LaunchConfiguration('use_sim_time')
     map_file = LaunchConfiguration('map_file')
+    user = LaunchConfiguration('user')
+
     
     declare_params = DeclareLaunchArgument(
         'params_file',
@@ -23,6 +25,11 @@ def generate_launch_description():
         default_value="/home/uni-co-jetson/ros2_ws/src/unico_pack/maps/warehouse_2d_map.yaml"
     )
 
+    declare_user = DeclareLaunchArgument(
+        'user',
+        default_value="uni-co-jetson"
+    )
+
     nodes = [
         # 全域規劃
         Node(
@@ -30,7 +37,8 @@ def generate_launch_description():
             executable='planner_server',
             name='planner_server',
             output='screen',
-            parameters=[params_file, {'use_sim_time': use_sim_time}]
+            parameters=[params_file, {'use_sim_time': use_sim_time}],
+            prefix=['nice -n 10 '],
         ),
         # controller
         Node(
@@ -42,6 +50,7 @@ def generate_launch_description():
             remappings=[
                 ('cmd_vel', 'cmd_vel_nav'),
             ],
+            prefix=['nice -n 10 '],
         ),
         # smoother
         # Node(
@@ -57,7 +66,8 @@ def generate_launch_description():
             executable='behavior_server',
             name='behavior_server',
             output='screen',
-            parameters=[params_file, {'use_sim_time': use_sim_time}]
+            parameters=[params_file, {'use_sim_time': use_sim_time}],
+            prefix=['nice -n 10 '],
         ),
         
         
@@ -82,6 +92,7 @@ def generate_launch_description():
             Node(
                 package='unico_pack',
                 executable='cmd_vel_bridge.py',
+                prefix=['nice -n 10 '],
             ),
 
 
@@ -91,7 +102,8 @@ def generate_launch_description():
                 executable='waypoint_follower',
                 name='waypoint_follower',
                 output='screen',
-                parameters=[params_file, {'use_sim_time': use_sim_time}]
+                parameters=[params_file, {'use_sim_time': use_sim_time}],
+                prefix=['nice -n 10 '],
             ),
 
             # bt navigator
@@ -100,7 +112,12 @@ def generate_launch_description():
                 executable='bt_navigator',
                 name='bt_navigator',
                 output='screen',
-                parameters=[params_file, {'use_sim_time': use_sim_time}]
+                parameters=[params_file, {
+                    'use_sim_time': use_sim_time,
+                    'default_nav_to_pose_bt_xml': PathJoinSubstitution(["/home/", user, "/ros2_ws/src/unico_pack/config/drone_nav.xml"]),
+                    'default_nav_through_poses_bt_xml': PathJoinSubstitution(["/home/", user, "/ros2_ws/src/unico_pack/config/drone_nav_through_poses.xml"])
+                    }],
+                prefix=['nice -n 10 '],
             ),
             
         ]
@@ -118,7 +135,8 @@ def generate_launch_description():
                 parameters=[{
                     'use_sim_time': use_sim_time,
                     'yaml_filename': map_file,
-                }]
+                }],
+                prefix=['nice -n 10 '],
             ),
 
             Node(
@@ -145,4 +163,4 @@ def generate_launch_description():
     )
     
 
-    return LaunchDescription([declare_params, declare_sim, declare_map] + nodes + [delayed_nodes] + [lifecycle_manager])
+    return LaunchDescription([declare_params, declare_sim, declare_map, declare_user] + nodes + [delayed_nodes] + [lifecycle_manager])
