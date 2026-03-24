@@ -12,12 +12,12 @@ from rclpy.qos import qos_profile_sensor_data
 
 # Import message type
 from campus_delivery_msgs.msg import NavTask, NavResult
-from geometry_msgs.msg import Pose2D, PoseStamped
+from geometry_msgs.msg import Pose2D, PoseStamped, TransformStamped
 from sensor_msgs.msg import BatteryState
 from std_msgs.msg import Header, Bool
 from nav2_msgs.action import NavigateToPose
 from rclpy.action import ActionClient
-
+from tf2_ros import StaticTransformBroadcaster
 
 class MqttToRosBridge(Node):
 
@@ -34,7 +34,8 @@ class MqttToRosBridge(Node):
         self.rosbag_folder_path = self.get_parameter("rosbag_folder_path").value
 
         # --- MQTT ROS 2 bridge topics ---
-        self.mqtt_broker = "192.168.166.83"
+        # self.mqtt_broker = "192.168.166.83"
+        self.mqtt_broker = "broker.emqx.io"
         self.nav_topic = "warehouse/task/request"
         self.notification_topic = "warehouse/task/notification"
         self.cancelled_topic = "warehouse/task/cancelled" # Topic for reporting back to server
@@ -78,6 +79,15 @@ class MqttToRosBridge(Node):
             qos_profile_sensor_data
         )
 
+        self.create_subscription(
+            Pose2D,
+            '/initial_tf',
+            self.initial_tf_callback,
+            10
+        )
+
+        self.static_tf = StaticTransformBroadcaster(self)
+
         self.create_timer(2, self.status_report)
 
         
@@ -112,6 +122,20 @@ class MqttToRosBridge(Node):
 
         # Startup protection: wait 3 seconds before accepting tasks
         self.create_timer(3.0, self._set_ready)
+
+    def initial_tf_callback(self, msg):
+        t = TransformStamped()
+        t.header.stamp = self.get_clock().now().to_msg()
+        t.header.frame_id = 'map'
+        t.child_frame_id = 'camera_init'
+        t.transform.translation.x = msg.x
+        t.transform.translation.y = msg.y
+        t.transform.translation.z = msg.theta
+        t.transform.rotation.x = 0.0
+        t.transform.rotation.y = 0.0
+        t.transform.rotation.z = 0.0
+        t.transform.rotation.w = 1.0
+        self.static_tf.sendTransform(t)  # 只需呼叫一次！
 
     def _set_ready(self):
         """Called once after startup delay to begin accepting tasks."""

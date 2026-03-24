@@ -10,6 +10,48 @@ find_package(ament_cmake REQUIRED)
 # uncomment the following section in order to fill in
 # further dependencies manually.
 # find_package(<dependency> REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(nav2_msgs REQUIRED)
+find_package(mavros_msgs REQUIRED)
+find_package(aruco_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(campus_delivery_msgs REQUIRED)
+
+add_executable(multi_marker_landing_node src/multi_marker_landing.cpp)
+ament_target_dependencies(multi_marker_landing_node 
+  rclcpp 
+  geometry_msgs 
+  sensor_msgs 
+  nav_msgs 
+  mavros_msgs 
+  aruco_msgs 
+  std_msgs 
+  tf2 
+  tf2_ros
+)
+
+add_executable(mission_dispatcher src/mission_dispatcher.cpp)
+ament_target_dependencies(mission_dispatcher
+  rclcpp 
+  rclcpp_action
+  nav2_msgs
+  geometry_msgs 
+  std_msgs 
+  tf2 
+  tf2_ros
+  campus_delivery_msgs
+)
+
+install(TARGETS
+  multi_marker_landing_node
+  mission_dispatcher
+  DESTINATION lib/${PROJECT_NAME}
+)
 
 install (
   DIRECTORY launch config maps
@@ -19,14 +61,8 @@ install (
 install(
   PROGRAMS
   src/cmd_vel_bridge.py
-  src/cargo_tracker.py
-  src/multi_marker_landing.py
-  src/multi_marker_landing_v2.py
   src/multi_marker_landing_v3.py
-  src/mission_dispatcher.py
-  src/mission_dispatcher_with_tracker.py
   src/mission_dispatcher_with_tracker_v2.py
-  src/mqtt_bridge.py
   src/manager.py
   DESTINATION lib/${PROJECT_NAME}
 )

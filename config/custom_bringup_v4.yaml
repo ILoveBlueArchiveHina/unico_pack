@@ -7,20 +7,13 @@ bt_navigator:
     bt_loop_duration: 10
     default_server_timeout: 20
     wait_for_service_timeout: 1000
-    
-    # 【關鍵修改 1】指定自定義的無人機專用 XML 路徑
-    # 請將此路徑改為您實際存放 XML 的位置 (例如您的 package 內)
-    
     plugin_lib_names:
       - nav2_compute_path_to_pose_action_bt_node
       - nav2_compute_path_through_poses_action_bt_node
       - nav2_smooth_path_action_bt_node
       - nav2_follow_path_action_bt_node
-      # - nav2_spin_action_bt_node           <-- 移除 (無人機不旋轉)
       - nav2_wait_action_bt_node
       - nav2_assisted_teleop_action_bt_node
-      # - nav2_back_up_action_bt_node        <-- 移除 (無人機不盲目後退)
-      # - nav2_drive_on_heading_bt_node      <-- 移除 (無人機不盲目直行)
       - nav2_clear_costmap_service_bt_node
       - nav2_is_stuck_condition_bt_node
       - nav2_goal_reached_condition_bt_node
@@ -54,10 +47,7 @@ bt_navigator:
       - nav2_controller_cancel_bt_node
       - nav2_path_longer_on_approach_bt_node
       - nav2_wait_cancel_bt_node
-      # - nav2_spin_cancel_bt_node           <-- 移除
-      # - nav2_back_up_cancel_bt_node        <-- 移除
       - nav2_assisted_teleop_cancel_bt_node
-      # - nav2_drive_on_heading_cancel_bt_node <-- 移除
       - nav2_is_battery_charging_condition_bt_node
 
 bt_navigator_navigate_through_poses_rclcpp_node:
@@ -99,8 +89,8 @@ controller_server:
     # MPPI parameters
     FollowPath:
       plugin: "nav2_mppi_controller::MPPIController"
-      time_steps: 56
-      model_dt: 0.05
+      time_steps: 28
+      model_dt: 0.1
       batch_size: 1000      # 2000 --> 1000 , reduce CPU usage (2026/3/10)
       vx_std: 0.2
       vy_std: 0.2
@@ -308,16 +298,6 @@ planner_server:
         w_smooth: 0.3
         w_data: 0.2
         tolerance: 1.0e-10
-
-# smoother_server:
-#   ros__parameters:
-#     use_sim_time: False
-#     smoother_plugins: ["simple_smoother"]
-#     simple_smoother:
-#       plugin: "nav2_smoother::SimpleSmoother"
-#       tolerance: 1.0e-10
-#       max_its: 1000
-#       do_refinement: True
 
 behavior_server:
   ros__parameters:

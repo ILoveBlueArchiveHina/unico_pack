@@ -9,9 +9,9 @@ def generate_launch_description():
             executable='manager.py',
             output='screen',
             parameters=[{
-                'home_pose_x': 0.0,
-                'home_pose_y': 0.0,
-                'rosbag_folder_path': '/home/uni-co-jetson/rosbag'
+                'home_pose_x': 16.3,
+                'home_pose_y': 8.77,
+                'rosbag_folder_path': '/home/uni_co/rosbag'
             }
             ],
             prefix=['nice -n 10 '],
