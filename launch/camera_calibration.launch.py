@@ -11,7 +11,7 @@ def generate_launch_description():
                 'video_device': '/dev/video0',
                 'image_width': 1280,
                 'image_height': 720,
-                'pixel_format': 'grey',
+                'pixel_format': 'mjpeg2rgb',
                 'framerate': 10.0,
                 'frame_id': "camera",
                 'camera_name': 'webcam'

@@ -34,8 +34,8 @@ class MqttToRosBridge(Node):
         self.rosbag_folder_path = self.get_parameter("rosbag_folder_path").value
 
         # --- MQTT ROS 2 bridge topics ---
-        # self.mqtt_broker = "192.168.166.83"
-        self.mqtt_broker = "broker.emqx.io"
+        self.mqtt_broker = "192.168.166.83"
+        # self.mqtt_broker = "broker.emqx.io"
         self.nav_topic = "warehouse/task/request"
         self.notification_topic = "warehouse/task/notification"
         self.cancelled_topic = "warehouse/task/cancelled" # Topic for reporting back to server
@@ -194,8 +194,8 @@ class MqttToRosBridge(Node):
                         # 防止陣列長度奇數導致 index out of range
                         if i + 1 < len(area_coords):
                             wp_msg = Pose2D()
-                            wp_msg.x = float(area_coords[i])
-                            wp_msg.y = float(area_coords[i+1])
+                            wp_msg.x = float(area_coords[i]) * 0.05
+                            wp_msg.y = -float(area_coords[i+1]) * 0.05
                             wp_msg.theta = 0.0  # no specific direction
                             ros_msg.waypoints.append(wp_msg)
                             

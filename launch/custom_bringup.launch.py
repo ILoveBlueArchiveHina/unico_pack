@@ -12,7 +12,7 @@ def generate_launch_description():
     
     declare_params = DeclareLaunchArgument(
         'params_file',
-        default_value='/home/uni-co-jetson/ros2_ws/src/unico_pack/config/custom_bringup_v3.yaml'
+        default_value='/home/uni-co-jetson/ros2_ws/src/unico_pack/config/custom_bringup_v4.yaml'
     )
 
     declare_sim = DeclareLaunchArgument(
@@ -37,7 +37,7 @@ def generate_launch_description():
             name='planner_server',
             output='screen',
             parameters=[params_file, {'use_sim_time': use_sim_time}],
-            prefix=['nice -n 10 '],
+            prefix=['taskset -c 1,2'],
         ),
 
     TimerAction(
@@ -52,7 +52,7 @@ def generate_launch_description():
             remappings=[
                 ('cmd_vel', 'cmd_vel_nav'),
             ],
-            prefix=['nice -n 10 '],
+            prefix=['taskset -c 1,2'],
         )]
     ),
 
@@ -65,7 +65,7 @@ def generate_launch_description():
             name='behavior_server',
             output='screen',
             parameters=[params_file, {'use_sim_time': use_sim_time}],
-            prefix=['nice -n 10 '],
+            prefix=['taskset -c 1,2'],
         )]
     ),
 
@@ -78,7 +78,7 @@ def generate_launch_description():
                 name='waypoint_follower',
                 output='screen',
                 parameters=[params_file, {'use_sim_time': use_sim_time}],
-                prefix=['nice -n 10 '],
+                prefix=['taskset -c 1,2'],
             )]
     ),
 
@@ -95,22 +95,12 @@ def generate_launch_description():
                     'default_nav_to_pose_bt_xml': PathJoinSubstitution(["/home", user, "ros2_ws/src/unico_pack/config/drone_nav.xml"]),
                     'default_nav_through_poses_bt_xml': PathJoinSubstitution(["/home", user, "ros2_ws/src/unico_pack/config/drone_nav_through_poses.xml"])
                     }],
-                prefix=['nice -n 10 '],
+                prefix=['taskset -c 1,2'],
             )]
     ),
 
     TimerAction(
         period = 15.0,
-        actions = [
-            Node(
-                package='unico_pack',
-                executable='cmd_vel_bridge.py',
-                prefix=['nice -n 10 '],
-            )]
-    ),
-
-    TimerAction(
-        period = 18.0,
         actions = [
             Node(
                 package='nav2_map_server',
@@ -121,13 +111,13 @@ def generate_launch_description():
                     'use_sim_time': use_sim_time,
                     'yaml_filename': map_file,
                 }],
-                prefix=['nice -n 10 '],
+                prefix=['taskset -c 1,2'],
             )]
     )
     ]
 
     lifecycle_manager = TimerAction(
-        period=21.0,
+        period=18.0,
         actions=[
             Node(
                 package='nav2_lifecycle_manager',
@@ -139,16 +129,14 @@ def generate_launch_description():
                     'autostart': True,
                     'node_names': [
                         'controller_server',
-                        # 'smoother_server',
                         'planner_server',
                         'behavior_server',
                         'bt_navigator',
                         'waypoint_follower',
-                        # 'velocity_smoother',
                         'map_server',
                     ]
                 }],
-                prefix=['nice -n 10 '],
+                prefix=['taskset -c 1,2'],
             )
         ]
     )

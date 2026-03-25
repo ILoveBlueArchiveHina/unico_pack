@@ -1,5 +1,5 @@
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, TimerAction
+from launch.actions import TimerAction
 from launch_ros.actions import Node
 
 def generate_launch_description():
@@ -9,18 +9,33 @@ def generate_launch_description():
             executable='manager.py',
             output='screen',
             parameters=[{
-                'home_pose_x': 16.3,
-                'home_pose_y': 8.77,
-                'rosbag_folder_path': '/home/uni_co/rosbag'
+                'home_pose_x': 2.0,
+                'home_pose_y': -2.05,
+                'rosbag_folder_path': '/home/uni-co-jetson/rosbag'
             }
             ],
-            prefix=['nice -n 10 '],
+            prefix=['taskset -c 3'],
         ),
 
-        Node(
+        TimerAction(
+        period = 3.0,
+        actions = [
+            Node(
             package='unico_pack',
             executable='mission_dispatcher_with_tracker_v2.py',
             output='screen',
-            prefix=['nice -n 10 '],
-        )
+            prefix=['taskset -c 3'],
+            )]
+        ),
+        
+
+        TimerAction(
+        period = 6.0,
+        actions = [
+            Node(
+                package='unico_pack',
+                executable='cmd_vel_bridge.py',
+                prefix=['taskset -c 3'],
+            )]
+        ),
     ])
