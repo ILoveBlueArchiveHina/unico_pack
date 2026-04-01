@@ -401,58 +401,64 @@ class Nav2Executor(Node):
         future.add_done_callback(partial(self.goal_response_callback, seq=self.execution_seq))
 
     def cmd_vel_callback(self, msg):
-        """Intercept Nav2 cmd_vel and override angular velocity if tracking"""
+        """Intercept Nav2 cmd_vel and override angular velocity if tracking.
+        Uses quaternion/complex number arithmetic to avoid Euler angle extraction,
+        and rotates the velocity vector to compensate for heading change."""
         if not self.tracking_active:
             self.cmd_pub.publish(msg)
             return
 
         try:
-            # Get current robot pose
             transform = self.tf_buffer.lookup_transform(
-                'map',
-                'base_link',
+                'map', 'base_link',
                 rclpy.time.Time(),
                 timeout=rclpy.duration.Duration(seconds=0.1)
             )
-            
             robot_x = transform.transform.translation.x
             robot_y = transform.transform.translation.y
-            
-            # Extract yaw from quaternion
             q = transform.transform.rotation
-            siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
-            cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
-            robot_yaw = math.atan2(siny_cosp, cosy_cosp)
-            
-        except Exception as e:
-            # self.get_logger().warn(f'TF lookup failed: {e}', throttle_duration_sec=1.0)
-            # If TF fails, pass through original cmd_vel
+        except Exception:
             self.cmd_pub.publish(msg)
             return
-        
-        # Calculate desired heading (toward orbit center)
+
         dx = self.center_x - robot_x
         dy = self.center_y - robot_y
-        desired_yaw = math.atan2(dy, dx)
-        
-        # Calculate yaw error (normalized to [-pi, pi])
-        yaw_error = desired_yaw - robot_yaw
-        yaw_error = math.atan2(math.sin(yaw_error), math.cos(yaw_error))
-        
-        # Create new cmd_vel with overridden angular velocity
-        new_cmd = Twist()
-        new_cmd.linear.x = msg.linear.x
-        new_cmd.linear.y = msg.linear.y
-        new_cmd.linear.z = msg.linear.z
-        
-        # Override angular velocity with P-controller
-        new_cmd.angular.z = self.angular_gain * yaw_error
-        
-        # Limit maximum angular velocity
+        dist = math.sqrt(dx * dx + dy * dy)
+        if dist < 1e-6:
+            self.cmd_pub.publish(msg)
+            return
+
+        # ── Quaternion / complex number arithmetic (no yaw extraction) ──
+
+        # Robot heading as unit complex number (from quaternion, qx=qy=0)
+        r_cos = q.w * q.w - q.z * q.z   # cos(robot_yaw)
+        r_sin = 2.0 * q.w * q.z         # sin(robot_yaw)
+
+        # Desired heading as unit complex number (direction to center)
+        d_cos = dx / dist                # cos(desired_yaw)
+        d_sin = dy / dist                # sin(desired_yaw)
+
+        # Error rotation = desired × conj(robot)
+        e_cos = d_cos * r_cos + d_sin * r_sin   # cos(yaw_error)
+        e_sin = d_sin * r_cos - d_cos * r_sin   # sin(yaw_error)
+
+        # ── Angular velocity P-controller (compute first, needed for compensation) ──
+        yaw_error = math.atan2(e_sin, e_cos)
+        angular_z = self.angular_gain * yaw_error
         max_angular_vel = 0.5
-        new_cmd.angular.z = max(-max_angular_vel, min(max_angular_vel, new_cmd.angular.z))
-        
-        # Publish
+        angular_z = max(-max_angular_vel, min(max_angular_vel, angular_z))
+
+        # ── Velocity vector rotation (compensate heading change) ──
+        # Nav2 expects the robot to face the direction of travel. 
+        # But we are forcing the robot to face the center object.
+        # So we must rotate Nav2's desired velocity vector by the difference 
+        # in heading (yaw_error) to maintain the correct movement direction in the global map.
+        new_cmd = Twist()
+        new_cmd.linear.x =  e_cos * msg.linear.x + e_sin * msg.linear.y
+        new_cmd.linear.y = -e_sin * msg.linear.x + e_cos * msg.linear.y
+        new_cmd.linear.z = msg.linear.z
+        new_cmd.angular.z = angular_z
+
         self.cmd_pub.publish(new_cmd)
 
 def main(args=None):

@@ -34,8 +34,8 @@ class MqttToRosBridge(Node):
         self.rosbag_folder_path = self.get_parameter("rosbag_folder_path").value
 
         # --- MQTT ROS 2 bridge topics ---
-        self.mqtt_broker = "192.168.166.83"
-        # self.mqtt_broker = "broker.emqx.io"
+        # self.mqtt_broker = "192.168.166.83"
+        self.mqtt_broker = "broker.emqx.io"
         self.nav_topic = "warehouse/task/request"
         self.notification_topic = "warehouse/task/notification"
         self.cancelled_topic = "warehouse/task/cancelled" # Topic for reporting back to server
@@ -88,7 +88,7 @@ class MqttToRosBridge(Node):
 
         self.static_tf = StaticTransformBroadcaster(self)
 
-        self.create_timer(2, self.status_report)
+        self.create_timer(5, self.status_report)
 
         
 
@@ -215,27 +215,19 @@ class MqttToRosBridge(Node):
         self.get_logger().info(f"Received Result for Task {msg.task_id}: {msg.result}")
         
         # Mark current processing as done
-        if msg.result == 1 or msg.result == 2:
-            # Sticking to user's code edit
-            self.is_processing = False
-
-        task_feedback = {
-            "task_id": msg.task_id,
-            "result": msg.result,
-            "failed_faces": list(msg.failed_faces),
-            "timestamp": datetime.now().isoformat()
-        }
         
-        try:
-            payload = json.dumps(task_feedback)
-            self.client.publish(self.feedback_topic, payload)
-            self.get_logger().warn(f"Mission Terminated. Report sent: {payload}")
-        except Exception as e:
-            self.get_logger().error(f"Failed to publish cancellation report: {e}")
+
+        self.send_feedback(
+            task_id=msg.task_id,
+            result=msg.result,
+            failed_faces=list(msg.failed_faces)
+        )
 
         # self.record_rosbag("off")
         # Trigger next
-        self.process_queue()
+        if msg.result in (1, 2):
+            self.is_processing = False
+            self.process_queue()
 
     def battery_callback(self, msg):
         self.battery_percentage = msg.percentage
@@ -250,26 +242,33 @@ class MqttToRosBridge(Node):
             self.get_logger().info(f"start to record rosbag(debug)")
 
     def status_report(self):
-        try:
-            if self.is_processing:
-                task_status = {
-                "status": "proccesing",
-                "battery": self.battery_percentage
-                }
-            else:
-                task_status = {
-                "status": "idle",
-                "battery": self.battery_percentage
-                }
-                
-        except Exception as e:
-            self.get_logger().error(f"failed to get battery msg")
+        if self.is_processing:
+            task_status = {
+            "status": "proccesing",
+            "battery": self.battery_percentage
+            }
+        else:
+            task_status = {
+            "status": "idle",
+            "battery": self.battery_percentage
+            }
             
+        payload = json.dumps(task_status)
+        self.client.publish(self.status_topic, payload)
+
+
+    def send_feedback(self, task_id, result, failed_faces):
         try:
-            payload = json.dumps(task_status)
-            self.client.publish(self.status_topic, payload)
+            feedback_msgs = {
+                "task_id": task_id,
+                "result": result,
+                "failed_faces": failed_faces,
+                "timestamp": datetime.now().isoformat()
+            }
+            payload = json.dumps(feedback_msgs)
+            self.client.publish(self.feedback_topic, payload)
         except Exception as e:
-            self.get_logger().error(f"Failed to publish cancellation report: {e}")
+            self.get_logger().error(f"Failed to publish feedback report: {e}")
 
     def process_queue(self):
         """Check queue and publish next task if idle"""

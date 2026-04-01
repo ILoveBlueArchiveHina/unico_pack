@@ -14,7 +14,6 @@ def generate_launch_description():
                 'rosbag_folder_path': '/home/uni-co-jetson/rosbag'
             }
             ],
-            prefix=['taskset -c 3'],
         ),
 
         TimerAction(
@@ -24,7 +23,6 @@ def generate_launch_description():
             package='unico_pack',
             executable='mission_dispatcher_with_tracker_v2.py',
             output='screen',
-            prefix=['taskset -c 3'],
             )]
         ),
         
@@ -34,8 +32,7 @@ def generate_launch_description():
         actions = [
             Node(
                 package='unico_pack',
-                executable='cmd_vel_bridge.py',
-                prefix=['taskset -c 3'],
+                executable='cmd_vel_bridge',
             )]
         ),
     ])

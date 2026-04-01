@@ -47,9 +47,17 @@ ament_target_dependencies(mission_dispatcher
   campus_delivery_msgs
 )
 
+add_executable(cmd_vel_bridge src/cmd_vel_bridge.cpp)
+ament_target_dependencies(cmd_vel_bridge
+  rclcpp 
+  geometry_msgs 
+  mavros_msgs 
+)
+
 install(TARGETS
   multi_marker_landing_node
   mission_dispatcher
+  cmd_vel_bridge
   DESTINATION lib/${PROJECT_NAME}
 )
 

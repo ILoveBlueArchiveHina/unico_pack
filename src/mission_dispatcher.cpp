@@ -284,8 +284,6 @@ private:
     void finish_task(bool success) {
         tracking_active_ = false;
         campus_delivery_msgs::msg::NavResult result_msg;
-        result_msg.header.stamp = this->get_clock()->now();
-        result_msg.header.frame_id = "map";
         result_msg.task_id = task_id_;
         result_msg.failed_faces = failed_faces_;
 
