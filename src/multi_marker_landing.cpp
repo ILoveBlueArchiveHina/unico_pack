@@ -42,24 +42,24 @@ public:
         INNER_MARKER_IDS = {100, 200, 300, 400};
         
         // Publishers
-        vel_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
-        is_landed_pub_ = this->create_publisher<std_msgs::msg::Bool>("/is_landed", 10);
+        vel_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 1);
+        is_landed_pub_ = this->create_publisher<std_msgs::msg::Bool>("/is_landed", 1);
         
         // Subscribers
         marker_sub_ = this->create_subscription<aruco_msgs::msg::MarkerArray>(
-            "/marker_publisher/markers", 10,
+            "/marker_publisher/markers", 1,
             std::bind(&MultiMarkerLanding::markers_callback, this, std::placeholders::_1));
             
         state_sub_ = this->create_subscription<mavros_msgs::msg::State>(
-            "/mavros/state", 10,
+            "/mavros/state", 1,
             std::bind(&MultiMarkerLanding::state_callback, this, std::placeholders::_1));
             
         extended_state_sub_ = this->create_subscription<mavros_msgs::msg::ExtendedState>(
-            "/mavros/extended_state", 10,
+            "/mavros/extended_state", 1,
             std::bind(&MultiMarkerLanding::extended_state_callback, this, std::placeholders::_1));
             
         altitude_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
-            "/Odometry", 10,
+            "/Odometry", 1,
             std::bind(&MultiMarkerLanding::altitude_callback, this, std::placeholders::_1));
             
         // Service Client

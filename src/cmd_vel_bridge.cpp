@@ -13,16 +13,16 @@ public:
         
         // 發布速度命令
         pub_ = this->create_publisher<mavros_msgs::msg::PositionTarget>(
-            "/mavros/setpoint_raw/local", 10);
+            "/mavros/setpoint_raw/local", 1);
             
         // 訂閱 cmd_vel
         sub_ = this->create_subscription<geometry_msgs::msg::Twist>(
-            "/cmd_vel", 10,
+            "/cmd_vel", 1,
             std::bind(&CopterVelocityControlFixed::cmd_callback, this, std::placeholders::_1));
             
         // 訂閱狀態
         state_sub_ = this->create_subscription<mavros_msgs::msg::State>(
-            "/mavros/state", 10,
+            "/mavros/state", 1,
             std::bind(&CopterVelocityControlFixed::state_callback, this, std::placeholders::_1));
             
         // 關鍵1：必須持續發送（20Hz = 50ms）

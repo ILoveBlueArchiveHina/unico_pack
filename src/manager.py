@@ -44,7 +44,7 @@ class MqttToRosBridge(Node):
         self.ros_topic = "navigation_tasks" # Republished ROS topic name
 
         # ---  ROS Publisher initialization ---
-        self.publisher_ = self.create_publisher(NavTask, self.ros_topic, 10)
+        self.publisher_ = self.create_publisher(NavTask, self.ros_topic, 1)
         
         # --- ROS Subscriber for feedback ---
         # User specified topic: /warehouse/task/feedback
@@ -55,21 +55,21 @@ class MqttToRosBridge(Node):
             NavResult,
             'navigation_result',
             self.result_callback,
-            10
+            1
         )
 
         self.create_subscription(
             Bool,
             'is_landed',
             self.is_landed_subscribe,
-            10
+            1
         )
 
         self.create_subscription(
             Bool,
             'ready_to_record_rosbag',
             self.ready_to_record_rosbag_signal_sub,
-            10
+            1
         )
 
         self.create_subscription(
@@ -83,7 +83,7 @@ class MqttToRosBridge(Node):
             Pose2D,
             '/initial_tf',
             self.initial_tf_callback,
-            10
+            1
         )
 
         self.static_tf = StaticTransformBroadcaster(self)

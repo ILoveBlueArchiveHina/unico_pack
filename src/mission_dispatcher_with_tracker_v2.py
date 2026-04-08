@@ -25,18 +25,18 @@ class Nav2Executor(Node):
             NavTask,
             'navigation_tasks',
             self.listener_callback,
-            10,
+            1,
             callback_group=self.callback_group)
 
         self.result_pub = self.create_publisher(
             NavResult,
             'navigation_result',
-            10)
+            1)
         
         self.ready_to_record_rosbag_pub = self.create_publisher(
             Bool,
             'ready_to_record_rosbag',
-            10
+            1
         )
 
         # 2. Create Nav2 Action Client
@@ -50,7 +50,7 @@ class Nav2Executor(Node):
             Twist,
             'cmd_vel_nav',
             self.cmd_vel_callback,
-            10,
+            1,
             callback_group=self.callback_group
         )
         self.cmd_pub = self.create_publisher(Twist, 'cmd_vel', 10)
