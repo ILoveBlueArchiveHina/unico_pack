@@ -194,8 +194,12 @@ class MqttToRosBridge(Node):
                         # 防止陣列長度奇數導致 index out of range
                         if i + 1 < len(area_coords):
                             wp_msg = Pose2D()
-                            wp_msg.x = float(area_coords[i]) * 0.05
-                            wp_msg.y = -float(area_coords[i+1]) * 0.05
+
+                            # 座標轉換
+                            x_raw = float(area_coords[i])
+                            y_raw = float(area_coords[i+1])
+                            wp_msg.x = round(((x_raw-100)*0.866 + 4)*0.05, 2)
+                            wp_msg.y = round(-((y_raw-100)*0.89125 + 10) * 0.05, 2)
                             wp_msg.theta = 0.0  # no specific direction
                             ros_msg.waypoints.append(wp_msg)
                             
