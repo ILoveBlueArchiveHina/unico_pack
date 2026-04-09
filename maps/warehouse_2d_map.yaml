@@ -1,4 +1,4 @@
-image: warehouse_2d_map.pgm
+image: warehouse_2d_map_v2.pgm
 mode: trinary
 resolution: 0.05
 # origin: [-15.2, -18, 0]

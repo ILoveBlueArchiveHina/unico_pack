@@ -13,7 +13,7 @@ def generate_launch_description():
                 'image_width': 1280,
                 'image_height': 720,
                 'pixel_format': 'mjpeg2rgb',
-                'framerate': 10.0,
+                'framerate': 5.0,
                 'camera_info_url': 'file:///home/uni-co-jetson/ros2_ws/src/unico_pack/config/arducam_fisheye.yaml',
                 'frame_id': "camera",
                 'camera_name': 'landing_cam'

@@ -34,8 +34,8 @@ class MqttToRosBridge(Node):
         self.rosbag_folder_path = self.get_parameter("rosbag_folder_path").value
 
         # --- MQTT ROS 2 bridge topics ---
-        # self.mqtt_broker = "192.168.166.83"
-        self.mqtt_broker = "broker.emqx.io"
+        self.mqtt_broker = "192.168.166.83"
+        # self.mqtt_broker = "broker.emqx.io"
         self.nav_topic = "warehouse/task/request"
         self.notification_topic = "warehouse/task/notification"
         self.cancelled_topic = "warehouse/task/cancelled" # Topic for reporting back to server
@@ -103,7 +103,7 @@ class MqttToRosBridge(Node):
         self.landed = False
         self.landing_process = None # Track the landing process
         self.rosbag_process = None # Track the rosbag recording process
-        self.rosbag_folder_name = ""
+        self.rosbag_folder_name = "testing"
         self.failed_faces = []
         self.battery_percentage = None
         self.ready = False  # Startup protection: ignore messages until ready
@@ -220,10 +220,10 @@ class MqttToRosBridge(Node):
         self.send_feedback(
             task_id=msg.task_id,
             result=msg.result,
-            failed_faces=list(msg.failed_faces)
+            failed_faces=list(msg.failed_faces) if msg.failed_faces is not None else []
         )
 
-        # self.record_rosbag("off")
+        self.record_rosbag("off")
         # Trigger next
         if msg.result in (1, 2):
             self.is_processing = False
@@ -238,7 +238,7 @@ class MqttToRosBridge(Node):
 
     def ready_to_record_rosbag_signal_sub(self, msg):
         if msg.data:
-            # self.record_rosbag("on",path=self.rosbag_folder_name)
+            self.record_rosbag("on",path=self.rosbag_folder_name)
             self.get_logger().info(f"start to record rosbag(debug)")
 
     def status_report(self):
@@ -290,6 +290,12 @@ class MqttToRosBridge(Node):
         # Publish
         self.publisher_.publish(next_task)
         self.get_logger().info(f"Executing Task {next_task.task_id} (Remaining in queue: {len(self.task_queue)})")
+
+        self.send_feedback(
+            task_id=self.current_task.task_id,
+            result=0,
+            failed_faces=[]
+        )
 
     def return_home(self):
         """Send specific Nav2 action to go to (0,0)"""
@@ -348,7 +354,7 @@ class MqttToRosBridge(Node):
     def handle_termination(self):
         """Clear queue and report cancelled tasks"""
         # Stop recording rosbag
-        # self.record_rosbag("off")
+        self.record_rosbag("off")
 
         # Collect IDs
         cancelled_ids = [task.task_id for task in self.task_queue]
@@ -432,10 +438,10 @@ class MqttToRosBridge(Node):
             # Generate timestamped output directory
             output_dir = f"{self.rosbag_folder_path}/{path}"
 
-            # Example: Record 3 topics (modify as needed)
+            # Record topics
             topics = [
                 "/zed/zed_node/rgb/color/rect/camera_info",
-                "/zed/zed_node/rgb/color/rect/image",
+                "/zed/zed_node/rgb/color/rect/image/compressed",
                 "/zed/zed_node/depth/depth_registered",
                 "/zed/zed_node/depth/camera_info",
                 "/zed/zed_node/imu/data",
