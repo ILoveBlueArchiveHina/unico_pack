@@ -2,6 +2,7 @@
 #include <geometry_msgs/msg/twist.hpp>
 #include <mavros_msgs/msg/position_target.hpp>
 #include <mavros_msgs/msg/state.hpp>
+#include <std_msgs/msg/Bool.hpp>
 
 #include <chrono>
 
@@ -24,6 +25,11 @@ public:
         state_sub_ = this->create_subscription<mavros_msgs::msg::State>(
             "/mavros/state", 1,
             std::bind(&CopterVelocityControlFixed::state_callback, this, std::placeholders::_1));
+
+        // 訂閱開始橋接信號
+        start_signal_sub_ = this->create_subscription<std_msgs::msg::Bool>(
+            "start_vel_bridging", 1,
+            std::bind(&CopterVelocityControlFixed::signal_callback, this, std::placeholders::_1));
             
         // 關鍵1：必須持續發送（20Hz = 50ms）
         timer_ = this->create_wall_timer(
@@ -44,6 +50,11 @@ private:
         // 接收 cmd_vel 並儲存（不直接發送）
         target_velocity_ = *msg;
     }
+
+    void signal_callback(const std_msgs::msg::Bool::SharedPtr msg) {
+        // 接收由 manager 發送的信號來決定何時開始橋接
+        ready_to_start_bridging_ = msg->data;
+    }
     
     void send_velocity() {
         // 只在已連接且在 GUIDED 模式時發送
@@ -51,6 +62,9 @@ private:
             return;
         }
         if (current_state_.mode != "GUIDED") {
+            return;
+        }
+        if (ready_to_start_bridging_ != true) {
             return;
         }
         
@@ -89,6 +103,7 @@ private:
     
     mavros_msgs::msg::State current_state_;
     geometry_msgs::msg::Twist target_velocity_;
+    bool ready_to_start_bridging_ = false;
 };
 
 int main(int argc, char **argv) {

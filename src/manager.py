@@ -4,10 +4,9 @@ from rclpy.node import Node
 import json
 import paho.mqtt.client as mqtt
 import subprocess
-import time
 import os
 import signal
-from datetime import datetime, timedelta
+from datetime import datetime
 from rclpy.qos import qos_profile_sensor_data
 
 # Import message type
@@ -18,6 +17,8 @@ from std_msgs.msg import Header, Bool
 from nav2_msgs.action import NavigateToPose
 from rclpy.action import ActionClient
 from tf2_ros import StaticTransformBroadcaster
+from mavros_msgs.srv import CommandTOL,CommandBool, SetMode
+from mavros_msgs import ExtendedState, State
 
 class MqttToRosBridge(Node):
 
@@ -28,14 +29,13 @@ class MqttToRosBridge(Node):
         self.declare_parameter("home_pose_x",0.0)
         self.declare_parameter("home_pose_y",0.0)
         self.declare_parameter("rosbag_folder_path","/home/uni-co-jetson/rosbag")
+        self.declare_parameter("mqtt_broker","192.168.166.83")
 
         self.home_pose_x = self.get_parameter("home_pose_x").value
         self.home_pose_y = self.get_parameter("home_pose_y").value
         self.rosbag_folder_path = self.get_parameter("rosbag_folder_path").value
+        self.mqtt_broker = self.get_parameter("mqtt_broker").value
 
-        # --- MQTT ROS 2 bridge topics ---
-        self.mqtt_broker = "192.168.166.83"
-        # self.mqtt_broker = "broker.emqx.io"
         self.nav_topic = "warehouse/task/request"
         self.notification_topic = "warehouse/task/notification"
         self.cancelled_topic = "warehouse/task/cancelled" # Topic for reporting back to server
@@ -45,6 +45,7 @@ class MqttToRosBridge(Node):
 
         # ---  ROS Publisher initialization ---
         self.publisher_ = self.create_publisher(NavTask, self.ros_topic, 1)
+        self.ready_to_nav_pub = self.create_publisher(Bool, 'ready_to_nav', 1)
         
         # --- ROS Subscriber for feedback ---
         # User specified topic: /warehouse/task/feedback
@@ -55,6 +56,20 @@ class MqttToRosBridge(Node):
             NavResult,
             'navigation_result',
             self.result_callback,
+            1
+        )
+
+        self.mavros_extended_state_sub = self.create_subscription(
+            ExtendedState,
+            '/mavros/extended_state',
+            self.mavros_extended_state_callback,
+            1
+        )
+
+        self.mavros_state_sub = self.create_subscription(
+            State,
+            '/mavros/state',
+            self.mavros_state_callback,
             1
         )
 
@@ -86,14 +101,19 @@ class MqttToRosBridge(Node):
             1
         )
 
+
         self.static_tf = StaticTransformBroadcaster(self)
-
         self.create_timer(5, self.status_report)
-
-        
 
         # --- Nav2 Action Client (Return Home) ---
         self.nav_to_pose_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
+
+        self.mavros_takeoff_client = self.create_client(CommandTOL, '/mavros/cmd/takeoff')
+        self.mavros_arm_client = self.create_client(CommandBool, '/mavros/cmd/arming')
+        self.mavros_mode_client = self.create_client(SetMode, '/mavros/set_mode')
+
+        self.req = CommandTOL.Request()
+
 
         # --- Manager State ---
         self.task_queue = []
@@ -107,6 +127,10 @@ class MqttToRosBridge(Node):
         self.failed_faces = []
         self.battery_percentage = None
         self.ready = False  # Startup protection: ignore messages until ready
+        self.mavros_state = State()
+        self.mavros_extended_state = ExtendedState()
+        self.ready_to_nav = False
+        self.current_status = 'offline'
 
         # --- MQTT Client initialization ---
         self.client = mqtt.Client()
@@ -121,7 +145,13 @@ class MqttToRosBridge(Node):
             self.get_logger().error(f"Cannot connect to MQTT: {e}")
 
         # Startup protection: wait 3 seconds before accepting tasks
-        self.create_timer(3.0, self._set_ready)
+        self.create_timer(3.0, self._set_ready) 
+    
+    def mavros_extended_state_callback(self, msg):
+        self.mavros_extended_state = msg
+
+    def mavros_state_callback(self, msg):
+        self.mavros_state = msg
 
     def initial_tf_callback(self, msg):
         t = TransformStamped()
@@ -142,6 +172,7 @@ class MqttToRosBridge(Node):
         if not self.ready:
             self.ready = True
             self.get_logger().info("Manager is now ready to accept tasks.")
+            self.current_status = 'idle'
 
     def on_connect(self, client, userdata, flags, rc):
         client.subscribe(self.nav_topic)
@@ -214,6 +245,48 @@ class MqttToRosBridge(Node):
         # we wait for home return to finish (is_processing will be True)
         self.process_queue()
 
+    def process_queue(self):
+        """Check queue and publish next task if idle"""
+        if self.is_processing:
+            return
+            
+        if not self.task_queue:
+            self.get_logger().info("Task Queue is empty, return home.")
+            self.return_home()
+            return
+            
+        # Pop next task
+        next_task = self.task_queue.pop(0)
+        self.is_processing = True
+        self.current_task = next_task
+        self.rosbag_folder_name = self.current_task.rosbag_path
+        self.is_returning_home = False # Ensure we clear this flag if set
+        
+        # Publish
+        self.publisher_.publish(next_task)
+
+        self.get_logger().info(f"Executing Task {next_task.task_id} (Remaining in queue: {len(self.task_queue)})")
+
+        self.send_feedback(
+            task_id=self.current_task.task_id,
+            result=0,
+            failed_faces=[]
+        )
+
+    def send_takeoff(self, altitude):
+        # 設定參數 (對應 CLI 的 {altitude: 1})
+        self.req.altitude = float(altitude)
+        # 其他常用參數預設值 (通常設為 0)
+        self.req.min_pitch = 0.0
+        self.req.yaw = 0.0
+        self.req.latitude = 0.0
+        self.req.longitude = 0.0
+        
+        # 非同步呼叫
+        self.future = self.mavros_takeoff_client.call_async(self.req)
+        rclpy.spin_until_future_complete(self, self.future)
+        return self.future.result()
+
     def result_callback(self, msg):
         """Handle completion feedback from mission dispatcher"""
         self.get_logger().info(f"Received Result for Task {msg.task_id}: {msg.result}")
@@ -246,16 +319,10 @@ class MqttToRosBridge(Node):
             self.get_logger().info(f"start to record rosbag(debug)")
 
     def status_report(self):
-        if self.is_processing:
-            task_status = {
-            "status": "proccesing",
-            "battery": self.battery_percentage
-            }
-        else:
-            task_status = {
-            "status": "idle",
-            "battery": self.battery_percentage
-            }
+        task_status = {
+        "status": self.current_status,
+        "battery": self.battery_percentage
+        }
             
         payload = json.dumps(task_status)
         self.client.publish(self.status_topic, payload)
@@ -274,32 +341,7 @@ class MqttToRosBridge(Node):
         except Exception as e:
             self.get_logger().error(f"Failed to publish feedback report: {e}")
 
-    def process_queue(self):
-        """Check queue and publish next task if idle"""
-        if self.is_processing:
-            return
-            
-        if not self.task_queue:
-            self.get_logger().info("Task Queue is empty, return home.")
-            self.return_home()
-            return
-            
-        # Pop next task
-        next_task = self.task_queue.pop(0)
-        self.is_processing = True
-        self.current_task = next_task
-        self.rosbag_folder_name = self.current_task.rosbag_path
-        self.is_returning_home = False # Ensure we clear this flag if set
-        
-        # Publish
-        self.publisher_.publish(next_task)
-        self.get_logger().info(f"Executing Task {next_task.task_id} (Remaining in queue: {len(self.task_queue)})")
-
-        self.send_feedback(
-            task_id=self.current_task.task_id,
-            result=0,
-            failed_faces=[]
-        )
+    
 
     def return_home(self):
         """Send specific Nav2 action to go to (0,0)"""
@@ -341,6 +383,7 @@ class MqttToRosBridge(Node):
     def home_result_callback(self, future):
         result = future.result().result
         self.get_logger().info("Arrived at Home (or action finished).")
+
         # self.precision_landing("on")
         self.is_processing = False
         self.is_returning_home = False
@@ -371,7 +414,7 @@ class MqttToRosBridge(Node):
         self.task_queue.clear()
         self.is_processing = False # Reset processing flag? 
         # Note: If a task is currently executing (is_processing=True), simply clearing queue won't stop it 
-        # unless we also send a Cancel to ROS. 
+        # unless we also send a Cancel to ROS. a
         # For now, we strictly follow request: report queue items.
         
         # Construct Report
