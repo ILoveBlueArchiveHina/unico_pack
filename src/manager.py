@@ -205,18 +205,13 @@ class MqttToRosBridge(Node):
         for task_data in task_list:
             # --- Create ROS messages (Must be created inside the loop) ---
             ros_msg = NavTask()
-            
-            # 1. Header
-            ros_msg.header = Header()
-            ros_msg.header.stamp = self.get_clock().now().to_msg()
-            ros_msg.header.frame_id = "map" # Reference tf frame
 
-            # 2. Basic information
+            # 1. Basic information
             ros_msg.task_id = task_data.get("task_id", "")
             ros_msg.rosbag_path = task_data.get("rosbag_path", "") 
             ros_msg.source_timestamp = str(task_data.get("timestamp", ""))
 
-            # 3. Area parsing [x1,y1,x2,y2,x3,y3,x4,y4]
+            # 2. Area parsing [x1,y1,x2,y2,x3,y3,x4,y4]
             if "area" in task_data:
                 area_coords = task_data.get("area", [])
                 # 確保長度是偶數，並且每兩個一組取 (x, y)

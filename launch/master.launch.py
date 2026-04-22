@@ -27,7 +27,6 @@ def generate_launch_description():
             package='unico_pack',
             executable='fast_lio_lifecycle_wrapper',
             prefix = ['taskset -c 4,5']
-        )
-        
+        ),
     ])
     

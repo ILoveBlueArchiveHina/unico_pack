@@ -10,6 +10,9 @@ class UsbCamLifecycleWrapper : public rclcpp_lifecycle::LifecycleNode {
 public:
     UsbCamLifecycleWrapper() : rclcpp_lifecycle::LifecycleNode("precision_landing_lifecycle"), child_pid_(-1) {
         RCLCPP_INFO(get_logger(), "precision_landing_lifecycle instantiated.");
+        configure_timer_ = create_wall_timer(
+            std::chrono::milliseconds(500),
+            [this]() { configure_timer_.reset(); this->configure(); });
     }
 
     LifecycleNodeInterface::CallbackReturn on_configure(const rclcpp_lifecycle::State &) {
@@ -65,6 +68,7 @@ public:
 
 private:
     pid_t child_pid_;
+    rclcpp::TimerBase::SharedPtr configure_timer_;
     rclcpp::TimerBase::SharedPtr monitor_timer_;
 
     void monitor_child() {

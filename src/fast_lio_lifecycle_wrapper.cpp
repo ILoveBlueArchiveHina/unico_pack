@@ -16,6 +16,9 @@ class FastLioLifecycleWrapper : public rclcpp_lifecycle::LifecycleNode {
 public:
     FastLioLifecycleWrapper() : rclcpp_lifecycle::LifecycleNode("fastlio_wrapper"), child_pid_(-1) {
         RCLCPP_INFO(get_logger(), "C++ Fast-LIO Wrapper instantiated. State: Unconfigured");
+        configure_timer_ = create_wall_timer(
+            std::chrono::milliseconds(500),
+            [this]() { configure_timer_.reset(); this->configure(); });
     }
 
     // 1. 配置階段
@@ -170,6 +173,7 @@ public:
 
 private:
     pid_t child_pid_;
+    rclcpp::TimerBase::SharedPtr configure_timer_;
     const int max_retries_ = 5;
     const int init_timeout_sec_ = 20;
 

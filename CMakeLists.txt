@@ -58,11 +58,18 @@ ament_target_dependencies(fast_lio_lifecycle_wrapper
   rclcpp_lifecycle 
 )
 
+add_executable(rosbag_lifecycle src/rosbag_lifecycle.cpp)
+ament_target_dependencies(rosbag_lifecycle 
+  rclcpp 
+  rclcpp_lifecycle
+)
+
 add_executable(cmd_vel_bridge src/cmd_vel_bridge.cpp)
 ament_target_dependencies(cmd_vel_bridge
   rclcpp 
   geometry_msgs 
   mavros_msgs 
+  std_msgs
 )
 
 install(TARGETS
@@ -71,6 +78,7 @@ install(TARGETS
   cmd_vel_bridge 
   precision_landing_lifecycle 
   fast_lio_lifecycle_wrapper 
+  rosbag_lifecycle
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -81,10 +89,9 @@ install (
 
 install(
   PROGRAMS
-  src/cmd_vel_bridge.py
-  src/multi_marker_landing_v3.py
   src/mission_dispatcher_v2.py
   src/manager.py
+  src/main.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

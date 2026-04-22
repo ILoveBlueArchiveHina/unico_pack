@@ -2,7 +2,7 @@
 #include <geometry_msgs/msg/twist.hpp>
 #include <mavros_msgs/msg/position_target.hpp>
 #include <mavros_msgs/msg/state.hpp>
-#include <std_msgs/msg/Bool.hpp>
+#include <std_msgs/msg/bool.hpp>
 
 #include <chrono>
 
@@ -99,6 +99,7 @@ private:
     rclcpp::Publisher<mavros_msgs::msg::PositionTarget>::SharedPtr pub_;
     rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr sub_;
     rclcpp::Subscription<mavros_msgs::msg::State>::SharedPtr state_sub_;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr start_signal_sub_;
     rclcpp::TimerBase::SharedPtr timer_;
     
     mavros_msgs::msg::State current_state_;
