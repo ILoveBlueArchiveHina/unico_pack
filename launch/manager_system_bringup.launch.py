@@ -57,7 +57,7 @@ def generate_launch_description():
 
         Node(
             package='unico_pack',
-            executable='rosbag_lifecycle'
+            executable='rosbag_lifecycle',
             prefix = ['taskset -c 3']
         )
     ])
