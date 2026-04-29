@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import rclpy
+import threading
 from rclpy.node import Node
 import json
 import paho.mqtt.client as mqtt
@@ -380,6 +381,7 @@ class ManagementNode(Node):
         if msg.result in (1, 2):
             self.is_processing = False
             self.current_status = 'idle'
+            self.complite_tasks.append(msg.task_id)
             self.process_queue()
 
     # ------------------------------------------------------------------ #
@@ -467,6 +469,13 @@ class ManagementNode(Node):
 
     def _home_response_callback(self, future):
         goal_handle = future.result()
+        threading.Thread(
+            target=self._upload_rosbag_to_nas,
+            args=(self.complite_tasks,),
+            daemon=True
+        ).start()
+        self.complite_tasks = []
+
         if not goal_handle.accepted:
             self.get_logger().error("Return to Home rejected!")
             self.is_processing = False
@@ -590,8 +599,15 @@ class ManagementNode(Node):
         else:
             self._lifecycle_transition(self._bag_change_state_cli, transition_id, f"Rosbag({path})")
 
-    def _upload_rosbag_to_nas(self, task_id_list):
-        for task_id in task_id_list:
+    def threading_program(self, target_function, input):
+        threading.Thread(
+            target=target_function,
+            args=(input,),
+            daemon=True
+        ).start()
+
+    def _upload_rosbag_to_nas(self, task_list):
+        for task_id in task_list:
             src = f"{self.rosbag_folder_path}/{task_id}"
             dst = f"{self.nas_mount_path}/{task_id}"
 

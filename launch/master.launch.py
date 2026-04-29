@@ -16,7 +16,13 @@ def generate_launch_description():
     
 
     return LaunchDescription([
-        # USB camera node (landing cam)
+        nav_bringup_launch,
+        Node(
+            package='unico_pack',
+            executable='precision_landing_lifecycle',
+            prefix = ['taskset -c 3']
+        ),
+
         Node(
             package='unico_pack',
             executable='precision_landing_lifecycle',
