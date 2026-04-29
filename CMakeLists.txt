@@ -87,6 +87,13 @@ install (
   DESTINATION share/${PROJECT_NAME}
 )
 
+execute_process(
+  COMMAND chmod +x
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/mission_dispatcher_v2.py
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/manager.py
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/main.py
+)
+
 install(
   PROGRAMS
   src/mission_dispatcher_v2.py

@@ -23,11 +23,14 @@ from lifecycle_msgs.msg import Transition
 from rcl_interfaces.srv import SetParameters
 from rcl_interfaces.msg import Parameter, ParameterValue, ParameterType
 
-class MqttToRosBridge(Node):
 
+LOW_BATTERY_THRESHOLD = 0.5
+
+class ManagementNode(Node):
     def __init__(self):
-        super().__init__('mqtt_bridge')
+        super().__init__('process_manager')
 
+        # launch parameters
         self.declare_parameter("home_pose_x", 0.0)
         self.declare_parameter("home_pose_y", 0.0)
         self.declare_parameter("rosbag_folder_path", "/home/uni-co-jetson/rosbag")
@@ -38,59 +41,45 @@ class MqttToRosBridge(Node):
         self.rosbag_folder_path = self.get_parameter("rosbag_folder_path").value
         self.mqtt_broker = self.get_parameter("mqtt_broker").value
 
-        self.nav_topic = "warehouse/task/request"
-        self.notification_topic = "warehouse/task/notification"
-        self.cancelled_topic = "warehouse/task/cancelled"
-        self.status_topic = "warehouse/task/status"
-        self.feedback_topic = "warehouse/task/feedback"
-        self.ros_topic = "navigation_tasks"
-
-        self.publisher_ = self.create_publisher(NavTask, self.ros_topic, 1)
+        # ROS2 topics (publisher)
+        self.task_publisher_ = self.create_publisher(NavTask, "navigation_tasks", 1)
         self.start_vel_bridge_signal_pub = self.create_publisher(Bool, 'start_vel_bridging', 1)
-        self._pl_change_state_cli = self.create_client(
-            ChangeState, '/precision_landing_node/change_state')
-        self._bag_change_state_cli = self.create_client(
-            ChangeState, '/rosbag_node/change_state')
-        self._bag_set_params_cli = self.create_client(
-            SetParameters, '/rosbag_node/set_parameters')
+        self.cancel_current_task_pub = self.create_publisher(Bool, "cancel_navigation", 1)
 
-        self.result_sub = self.create_subscription(
-            NavResult, 'navigation_result', self.result_callback, 1)
+        # ROS2 topics (subscriber)
+        self.create_subscription(NavResult, 'navigation_result', self.result_callback, 1)
+        self.create_subscription(ExtendedState, '/mavros/extended_state', self.mavros_extended_state_callback, 1)
+        self.create_subscription(State, '/mavros/state', self.mavros_state_callback, 1)
+        self.create_subscription(Bool, 'is_landed', self.is_landed_subscribe, 1)
+        self.create_subscription(Bool, 'ready_to_record_rosbag', self.ready_to_record_rosbag_signal_sub, 1)
+        self.create_subscription(BatteryState, '/mavros/battery', self.battery_callback, qos_profile_sensor_data)
+        self.create_subscription(Pose2D, '/initial_tf', self.initial_tf_callback, 1)
 
-        self.create_subscription(
-            ExtendedState, '/mavros/extended_state',
-            self.mavros_extended_state_callback, 1)
-
-        self.create_subscription(
-            State, '/mavros/state',
-            self.mavros_state_callback, 1)
-
-        self.create_subscription(
-            Bool, 'is_landed', self.is_landed_subscribe, 1)
-
-        self.create_subscription(
-            Bool, 'ready_to_record_rosbag',
-            self.ready_to_record_rosbag_signal_sub, 1)
-
-        self.create_subscription(
-            BatteryState, '/mavros/battery',
-            self.battery_callback, qos_profile_sensor_data)
-
-        self.create_subscription(
-            Pose2D, '/initial_tf', self.initial_tf_callback, 1)
-
-        self.static_tf = StaticTransformBroadcaster(self)
-        self.create_timer(5, self.status_report)
-
-        self.nav_to_pose_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
+        # ROS2 client
+        self._pl_change_state_cli = self.create_client(ChangeState, '/precision_landing_node/change_state')
+        self._bag_change_state_cli = self.create_client(ChangeState, '/rosbag_node/change_state')
+        self._bag_set_params_cli = self.create_client(SetParameters, '/rosbag_node/set_parameters')
 
         self.mavros_takeoff_client = self.create_client(CommandTOL, '/mavros/cmd/takeoff')
         self.mavros_arm_client = self.create_client(CommandBool, '/mavros/cmd/arming')
         self.mavros_mode_client = self.create_client(SetMode, '/mavros/set_mode')
 
+        self.nav_to_pose_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
+        
+
+        # Timer
+        self.create_timer(5.0, self._status_report)
+        self.set_ready_timer_ = self.create_timer(3.0, self._set_ready)
+
+        # TF Broadcaster
+        self.static_tf = StaticTransformBroadcaster(self)
+
+        # Intialize variables
         self.task_queue = []
-        self.is_processing = False
+        self.complite_tasks = []
+        self.remaining_tasks = []
         self.current_task = None
+        self.is_processing = False
         self.is_returning_home = False
         self.landed = False
         self.landing_process = None
@@ -104,11 +93,21 @@ class MqttToRosBridge(Node):
         self._takeoff_altitude = 1.0
         self._takeoff_poll_timer = None
         self._takeoff_poll_count = 0
-        self._takeoff_poll_task = None
 
+        # MQTT topics
+        self.task_mqtt_topic = "warehouse/task/request"
+        self.notification_mqtt_topic = "warehouse/task/notification"
+        self.cancelled_mqtt_topic = "warehouse/task/cancelled"
+        self.status_mqtt_topic = "warehouse/task/status"
+        self.feedback_mqtt_topic = "warehouse/task/feedback"
+
+        # MQTT client
         self.client = mqtt.Client()
         self.client.on_connect = self.on_connect
         self.client.on_message = self.on_message
+
+        # NAS server
+        self.nas_mount_path = "/mnt/data"
 
         try:
             self.client.connect(self.mqtt_broker, 1883, 60)
@@ -117,7 +116,27 @@ class MqttToRosBridge(Node):
         except Exception as e:
             self.get_logger().error(f"Cannot connect to MQTT: {e}")
 
-        self.create_timer(3.0, self._set_ready)
+
+    def _low_battery_process(self):
+        """ 當電量低時執行 """
+        self.remaining_task_ids = self._get_remaining_tasks_list()
+        self.task_queue.clear()
+        self.is_processing = False
+        self.record_rosbag("off")
+        self._cancel_current_task()
+        self.return_home()
+
+    def _cancel_current_task(self):
+        msg = Bool()
+        msg.data = True
+        self.cancel_current_task_pub.publish(msg)
+
+    def _get_remaining_tasks_list(self):
+        remaining_task_ids = [task.task_id for task in self.task_queue]
+        if self.is_processing and self.current_task:
+            remaining_task_ids.insert(0, self.current_task.task_id)
+
+        return remaining_task_ids
 
     # ------------------------------------------------------------------ #
     #  State helpers                                                       #
@@ -132,6 +151,9 @@ class MqttToRosBridge(Node):
     def _is_in_air(self):
         return self.mavros_extended_state.landed_state == ExtendedState.LANDED_STATE_IN_AIR
 
+    def _current_flight_mode(self):
+        return self.mavros_state.mode
+
     def initial_tf_callback(self, msg):
         t = TransformStamped()
         t.header.stamp = self.get_clock().now().to_msg()
@@ -144,20 +166,22 @@ class MqttToRosBridge(Node):
         self.static_tf.sendTransform(t)
 
     def _set_ready(self):
+        """ Filter out old messages remaining on MQTT. """
+        self.set_ready_timer_.destroy()
         if not self.ready_receive_mqtt:
             self.ready_receive_mqtt = True
             self.current_status = 'idle'
             self.get_logger().info("Manager is now ready to accept tasks.")
 
     # ------------------------------------------------------------------ #
-    #  MQTT                                                                #
+    #  MQTT                                                              #
     # ------------------------------------------------------------------ #
 
     def on_connect(self, client, userdata, flags, rc):
-        client.subscribe(self.nav_topic)
-        client.subscribe(self.notification_topic)
+        client.subscribe(self.task_mqtt_topic)
+        client.subscribe(self.notification_mqtt_topic)
         self.get_logger().info(
-            f"Subscribed to MQTT topics: {self.nav_topic}, {self.notification_topic}")
+            f"Subscribed to MQTT topics: {self.task_mqtt_topic}, {self.notification_mqtt_topic}")
 
     def on_message(self, client, userdata, msg):
         if not self.ready_receive_mqtt:
@@ -167,9 +191,9 @@ class MqttToRosBridge(Node):
 
         try:
             data = json.loads(msg.payload.decode('utf-8'))
-            if msg.topic == self.nav_topic:
+            if msg.topic == self.task_mqtt_topic:
                 self.handle_navigation_task(data)
-            elif msg.topic == self.notification_topic:
+            elif msg.topic == self.notification_mqtt_topic:
                 self.handle_notification(data)
         except json.JSONDecodeError:
             self.get_logger().error("Received invalid JSON format")
@@ -194,6 +218,8 @@ class MqttToRosBridge(Node):
                 wp_msg = Pose2D()
                 x_raw = float(area_coords[i])
                 y_raw = float(area_coords[i + 1])
+
+                # Coordinate transform (1900x1000 to 1482x728)
                 wp_msg.x = round(((x_raw - 100) * 0.866 + 4) * 0.05, 2)
                 wp_msg.y = round(-((y_raw - 100) * 0.89125 + 10) * 0.05, 2)
                 ros_msg.waypoints.append(wp_msg)
@@ -217,22 +243,21 @@ class MqttToRosBridge(Node):
 
         self.is_processing = True
         self.current_status = 'processing'
-        next_task = self.task_queue.pop(0)
-        self.current_task = next_task
-        self.rosbag_folder_name = next_task.rosbag_path
+        self.current_task = self.task_queue.pop(0)
+        self.rosbag_folder_name = self.current_task.rosbag_path
         self.is_returning_home = False
 
         if self._is_in_air():
-            self._execute_task(next_task)
+            self._execute_task(self.current_task)
         else:
             self.get_logger().info("Drone on ground. Starting flight sequence before task.")
-            self._flight_sequence(next_task)
+            self._flight_sequence()
 
     # ------------------------------------------------------------------ #
     #  Flight sequence: set mode → arm → takeoff → poll altitude          #
     # ------------------------------------------------------------------ #
 
-    def _flight_sequence(self, task):
+    def _flight_sequence(self):
         """Async chain: GUIDED mode → arm → takeoff → wait for air → execute."""
         if not self.mavros_mode_client.wait_for_service(timeout_sec=3.0):
             self.get_logger().error("SetMode service unavailable. Aborting task.")
@@ -242,9 +267,9 @@ class MqttToRosBridge(Node):
         req = SetMode.Request()
         req.custom_mode = 'GUIDED'
         future = self.mavros_mode_client.call_async(req)
-        future.add_done_callback(lambda f: self._on_mode_set(f, task))
+        future.add_done_callback(self._on_mode_set)
 
-    def _on_mode_set(self, future, task):
+    def _on_mode_set(self, future):
         try:
             if not future.result().mode_sent:
                 self.get_logger().error("SetMode GUIDED failed. Aborting task.")
@@ -265,9 +290,9 @@ class MqttToRosBridge(Node):
         req = CommandBool.Request()
         req.value = True
         future = self.mavros_arm_client.call_async(req)
-        future.add_done_callback(lambda f: self._on_armed(f, task))
+        future.add_done_callback(self._on_armed)
 
-    def _on_armed(self, future, task):
+    def _on_armed(self, future):
         try:
             if not future.result().success:
                 self.get_logger().error("Arming failed. Aborting task.")
@@ -292,9 +317,9 @@ class MqttToRosBridge(Node):
         req.latitude = 0.0
         req.longitude = 0.0
         future = self.mavros_takeoff_client.call_async(req)
-        future.add_done_callback(lambda f: self._on_takeoff_sent(f, task))
+        future.add_done_callback(self._on_takeoff_sent)
 
-    def _on_takeoff_sent(self, future, task):
+    def _on_takeoff_sent(self, future):
         try:
             if not future.result().success:
                 self.get_logger().error("Takeoff command rejected. Aborting task.")
@@ -307,7 +332,6 @@ class MqttToRosBridge(Node):
 
         self.get_logger().info("Takeoff command accepted. Waiting for altitude...")
         self._takeoff_poll_count = 0
-        self._takeoff_poll_task = task
         self._takeoff_poll_timer = self.create_timer(1, self._poll_altitude)
 
     def _poll_altitude(self):
@@ -315,14 +339,11 @@ class MqttToRosBridge(Node):
         self._takeoff_poll_count += 1
 
         if self._is_in_air():
-            self._takeoff_poll_timer.cancel()
-            self._takeoff_poll_timer = None
+            self._takeoff_poll_timer.destroy()
             self.get_logger().info("Drone airborne. Executing task.")
-            self._execute_task(self._takeoff_poll_task)
-            self._takeoff_poll_task = None
+            self._execute_task(self.current_task)
         elif self._takeoff_poll_count >= 20:
-            self._takeoff_poll_timer.cancel()
-            self._takeoff_poll_timer = None
+            self._takeoff_poll_timer.destroy()
             self.get_logger().error("Timed out waiting for takeoff. Aborting task.")
             self._abort_flight_sequence()
 
@@ -336,7 +357,7 @@ class MqttToRosBridge(Node):
 
     def _execute_task(self, task):
         """Publish task to mission_dispatcher."""
-        self.publisher_.publish(task)
+        self.task_publisher_.publish(task)
         bridge_signal_ = Bool()
         bridge_signal_.data = True
         self.start_vel_bridge_signal_pub.publish(bridge_signal_)
@@ -347,10 +368,12 @@ class MqttToRosBridge(Node):
     def result_callback(self, msg):
         self.get_logger().info(f"Received Result for Task {msg.task_id}: {msg.result}")
 
-        self.send_feedback(
-            task_id=msg.task_id,
-            result=msg.result,
-            failed_faces=list(msg.failed_faces) if msg.failed_faces is not None else [])
+        if msg.result == 2:
+            self.send_feedback(
+                task_id=msg.task_id,
+                result=msg.result,
+                failed_faces=list(msg.failed_faces) if msg.failed_faces is not None else []
+            )
 
         self.record_rosbag("off")
 
@@ -375,24 +398,41 @@ class MqttToRosBridge(Node):
             self.record_rosbag("on", path=self.rosbag_folder_name)
             self.get_logger().info("Starting rosbag recording")
 
-    def status_report(self):
+    def _status_report(self):
         payload = json.dumps({
             "status": self.current_status,
             "battery": self.battery_percentage
         })
-        self.client.publish(self.status_topic, payload)
+        self.client.publish(self.status_mqtt_topic, payload)
+
+        if self._is_in_air() and self.battery_percentage is not None:
+            if self.battery_percentage < LOW_BATTERY_THRESHOLD:
+                self._low_battery_process()
 
     def send_feedback(self, task_id, result, failed_faces):
+        # send feedback to MQTT server
         try:
             payload = json.dumps({
                 "task_id": task_id,
-                "result": result,
+                "result": result,        # 0=任務成立,1=Rosbag上傳成功,2=導航失敗,3=Rosbag上傳失敗
                 "failed_faces": failed_faces,
                 "timestamp": datetime.now().isoformat()
             })
-            self.client.publish(self.feedback_topic, payload)
+            self.client.publish(self.feedback_mqtt_topic, payload)
         except Exception as e:
             self.get_logger().error(f"Failed to publish feedback: {e}")
+
+    def send_cancelled_task_list(self, cancelled_ids):
+        try:
+            payload = json.dumps({
+                "cancelled_task_ids": cancelled_ids,
+                "timestamp": datetime.now().isoformat()
+            })
+            self.client.publish(self.cancelled_mqtt_topic, payload)
+            self.get_logger().warn(f"Mission terminated. Cancelled: {payload}")
+        except Exception as e:
+            self.get_logger().error(f"Failed to publish cancellation report: {e}")
+
 
     # ------------------------------------------------------------------ #
     #  Return to Home                                                      #
@@ -407,7 +447,8 @@ class MqttToRosBridge(Node):
             return
 
         if not self.nav_to_pose_client.wait_for_server(timeout_sec=2.0):
-            self.get_logger().error("Nav2 Action Server unavailable. Cannot return home.")
+            self.get_logger().error("Nav2 Action Server unavailable. Cannot return home. START FORCE LANDING")
+            self.force_landing()
             return
 
         self.get_logger().info("Initiating Return to Home...")
@@ -422,25 +463,51 @@ class MqttToRosBridge(Node):
         goal_msg.pose.pose.orientation.w = 1.0
 
         future = self.nav_to_pose_client.send_goal_async(goal_msg)
-        future.add_done_callback(self.home_response_callback)
+        future.add_done_callback(self._home_response_callback)
 
-    def home_response_callback(self, future):
+    def _home_response_callback(self, future):
         goal_handle = future.result()
         if not goal_handle.accepted:
             self.get_logger().error("Return to Home rejected!")
             self.is_processing = False
             self.is_returning_home = False
+            self.force_landing()
             return
 
         self.get_logger().info("Return to Home accepted.")
-        goal_handle.get_result_async().add_done_callback(self.home_result_callback)
+        goal_handle.get_result_async().add_done_callback(self._home_result_callback)
 
-    def home_result_callback(self, future):
+    def _home_result_callback(self, future):
         self.get_logger().info("Arrived at Home. Starting precision landing...")
-        self.precision_landing("on")
+        if not self.precision_landing("on"):
+            self.force_landing()
         self.current_status = 'charging'
         self.is_processing = False
         self.is_returning_home = False
+
+    def force_landing(self):
+        if not self._is_in_air():
+            self.get_logger().info("Drone already on ground.")
+            return
+
+        if not self.mavros_mode_client.wait_for_service(timeout_sec=3.0):
+            self.get_logger().error("SetMode service unavailable.")
+            return
+
+        req = SetMode.Request()
+        req.custom_mode = 'LAND'
+        future = self.mavros_mode_client.call_async(req)
+        future.add_done_callback(self._set_land_mode_responese)
+
+    def _set_land_mode_responese(self, future):
+        try:
+            if not future.result().mode_sent:
+                self.get_logger().error("Landing failed.")
+                return
+        except Exception as e:
+            self.get_logger().error(f"Landing error: {e}")
+            return
+        
 
     # ------------------------------------------------------------------ #
     #  Notifications & termination                                         #
@@ -457,43 +524,34 @@ class MqttToRosBridge(Node):
         """Clear queue, report cancelled tasks, return home."""
         self.record_rosbag("off")
 
-        cancelled_ids = [task.task_id for task in self.task_queue]
-        if self.is_processing and self.current_task:
-            cancelled_ids.insert(0, self.current_task.task_id)
+        cancelled_ids = self._get_remaining_tasks_list()
 
         self.task_queue.clear()
         self.is_processing = False
         # Note: mission_dispatcher's active Nav2 goal is NOT cancelled here.
         # A future improvement is to publish a cancel signal to mission_dispatcher.
 
-        try:
-            payload = json.dumps({
-                "cancelled_task_ids": cancelled_ids,
-                "timestamp": datetime.now().isoformat()
-            })
-            self.client.publish(self.cancelled_topic, payload)
-            self.get_logger().warn(f"Mission terminated. Cancelled: {payload}")
-        except Exception as e:
-            self.get_logger().error(f"Failed to publish cancellation report: {e}")
-
+        self.send_cancelled_task_list(cancelled_ids)
         self.return_home()
 
     # ------------------------------------------------------------------ #
-    #  Subprocesses                                                        #
+    #  Subprocesses                                                      #
     # ------------------------------------------------------------------ #
 
     def _lifecycle_transition(self, client, transition_id, label):
         if not client.wait_for_service(timeout_sec=2.0):
             self.get_logger().error(f"{label} change_state service not available.")
-            return
+            return False
         req = ChangeState.Request()
         req.transition.id = transition_id
         future = client.call_async(req)
-        future.add_done_callback(
-            lambda f: self.get_logger().info(f"{label} transition OK.")
-            if f.result().success
-            else self.get_logger().error(f"{label} transition FAILED.")
-        )
+        rclpy.spin_until_future_complete(self, future, timeout_sec=5.0)
+        result = future.result()
+        if result is not None and result.success:
+            self.get_logger().info(f"{label} transition OK.")
+            return True
+        self.get_logger().error(f"{label} transition FAILED.")
+        return False
 
     def precision_landing(self, action="on"):
         transition_id = {
@@ -503,7 +561,7 @@ class MqttToRosBridge(Node):
         if transition_id is None:
             self.get_logger().warn(f"Unknown action for precision_landing: {action}")
             return
-        self._lifecycle_transition(self._pl_change_state_cli, transition_id, "PrecisionLanding")
+        return self._lifecycle_transition(self._pl_change_state_cli, transition_id, "PrecisionLanding")
 
     def record_rosbag(self, action="on", path="default"):
         transition_id = {
@@ -532,6 +590,29 @@ class MqttToRosBridge(Node):
         else:
             self._lifecycle_transition(self._bag_change_state_cli, transition_id, f"Rosbag({path})")
 
+    def _upload_rosbag_to_nas(self, task_id_list):
+        for task_id in task_id_list:
+            src = f"{self.rosbag_folder_path}/{task_id}"
+            dst = f"{self.nas_mount_path}/{task_id}"
+
+            # 先確認 NAS 有掛載
+            if not os.path.ismount(self.nas_mount_path):
+                self.get_logger().error("NAS not mounted. Skipping upload.")
+                return
+
+            try:
+                shutil.copytree(src, dst)
+                src_size = sum(f.stat().st_size for f in Path(src).rglob('*') if f.is_file())
+                dst_size = sum(f.stat().st_size for f in Path(dst).rglob('*') if f.is_file())
+                if src_size != dst_size:
+                    raise RuntimeError(f"Size mismatch: {src_size} vs {dst_size}")
+
+                self.get_logger().info(f"Rosbag uploaded: {task_id}")
+                self.send_feedback(task_id=task_id, result=1, failed_faces=[])
+            except Exception as e:
+                self.get_logger().error(f"Rosbag upload failed: {e}")
+                self.send_feedback(task_id=task_id, result=3, failed_faces=[])
+
     def cleanup_subprocesses(self):
         self._lifecycle_transition(
             self._pl_change_state_cli, Transition.TRANSITION_DEACTIVATE, "PrecisionLanding")
@@ -541,7 +622,7 @@ class MqttToRosBridge(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = MqttToRosBridge()
+    node = ManagementNode()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

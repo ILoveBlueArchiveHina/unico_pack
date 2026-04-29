@@ -14,7 +14,7 @@ public:
         declare_parameter<std::string>("output_path", "/tmp/rosbag");
         declare_parameter<std::vector<std::string>>("topics", {
             "/zed/zed_node/rgb/color/rect/camera_info",
-            "/zed/zed_node/rgb/color/rect/image/compressed",
+            "/zed/zed_node/rgb/color/rect/image",
             "/zed/zed_node/depth/depth_registered",
             "/zed/zed_node/depth/camera_info",
             "/zed/zed_node/imu/data",

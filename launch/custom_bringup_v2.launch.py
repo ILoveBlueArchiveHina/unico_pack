@@ -30,6 +30,7 @@ def generate_launch_description():
         default_value="uni-co-jetson"
     )
 
+
     nodes = [
         Node(
             package='nav2_planner',
@@ -95,21 +96,21 @@ def generate_launch_description():
             prefix=['taskset -c 1,2'],
         ),
 
-        Node(
-            package='tf2_ros',
-            executable='static_transform_publisher',
-            name='static_tf_map',
-            output='screen',
-            arguments=[
-                '--x', '2.0',
-                '--y', '-2.05',
-                '--z', '2.05',
-                '--roll', '0.0',
-                '--pitch', '0.0',
-                '--yaw', '0.0',
-                '--frame-id', 'map',
-                '--child-frame-id', 'camera_init']
-        ),
+        # Node(
+        #     package='tf2_ros',
+        #     executable='static_transform_publisher',
+        #     name='static_tf_map',
+        #     output='screen',
+        #     arguments=[
+        #         '--x', '2.0',
+        #         '--y', '-2.05',
+        #         '--z', '2.05',
+        #         '--roll', '0.0',
+        #         '--pitch', '0.0',
+        #         '--yaw', '0.0',
+        #         '--frame-id', 'map',
+        #         '--child-frame-id', 'camera_init']
+        # ),
 
     # TimerAction(
     #     period = 18.0,

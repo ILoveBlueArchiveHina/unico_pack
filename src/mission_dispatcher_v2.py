@@ -10,7 +10,7 @@ from action_msgs.msg import GoalStatus
 # Message type
 from campus_delivery_msgs.msg import NavTask, NavResult  # My custom messages
 from nav2_msgs.action import FollowWaypoints # Nav2 Actions
-from geometry_msgs.msg import PoseStamped, Twist, Point    # Nav2 target pose message type
+from geometry_msgs.msg import PoseStamped, Point    # Nav2 target pose message type
 from std_msgs.msg import Bool
 
 class Nav2Executor(Node):
@@ -27,6 +27,14 @@ class Nav2Executor(Node):
             self.listener_callback,
             1,
             callback_group=self.callback_group)
+
+        self.cancel_current_task_sub = self.create_subscription(
+            Bool,
+            'cancel_navigation', 
+            self.cancel_current_task_callback, 
+            1,
+            callback_group=self.callback_group
+        )
 
         self.result_pub = self.create_publisher(
             NavResult,
@@ -48,8 +56,6 @@ class Nav2Executor(Node):
         # 2. Create Nav2 Action Client
         self._action_client = ActionClient(self, FollowWaypoints, 'follow_waypoints', callback_group=self.callback_group)
         
-        self.cmd_pub = self.create_publisher(Twist, 'cmd_vel', 10)
-        
         # Tracking State
         self.tracking_active = False
         self.center_x = 0.0
@@ -64,6 +70,8 @@ class Nav2Executor(Node):
         self.failed_faces = [] # Store which faces failed sampling
         self.expanded_points = [] # All 4 expanded starting points
         self.current_start_index = 0 # Which starting point we are trying
+        self._current_goal_handle = None
+        self._is_task_cancelled = False
 
     def listener_callback(self, msg):
         """Receive task from MQTT Bridge and call Nav2"""
@@ -74,6 +82,15 @@ class Nav2Executor(Node):
              self.handle_cargo_task(msg.waypoints)
         else:
             self.get_logger().warn(f'Refuse to execute a task with {len(msg.waypoints)} waypoints.')
+
+    def cancel_current_task_callback(self, msg):
+        if msg.data and self._current_goal_handle is not None:
+            self._is_task_cancelled = True
+            self._current_goal_handle.cancel_goal_async()
+            self._current_goal_handle = None
+            self.cargo_queue.clear()
+            self.expanded_points = []
+            self.finish_task(success=False)
 
     def handle_cargo_task(self, waypoints_data):
         """Handle 4-waypoint cargo inspection with loop expansion"""
@@ -161,14 +178,19 @@ class Nav2Executor(Node):
             self.current_start_index += 1
             self.try_next_start_point()
             return
-            
+
         self.get_logger().info('Approach goal accepted.')
+        self._current_goal_handle = goal_handle
         result_future = goal_handle.get_result_async()
         result_future.add_done_callback(self.approach_result_callback)
 
     def approach_result_callback(self, future):
+        self._current_goal_handle = None
+        if self._is_task_cancelled:
+            self._is_task_cancelled = False
+            return
+
         result = future.result().result
-        self.cmd_pub.publish(Twist())  # brakes
         if len(result.missed_waypoints) == 0:
             self.get_logger().info('Phase 1: Approach Complete. Starting Phase 2: Inspection Loop.')
             # Rotate cargo_queue so inspection legs start from the successful point
@@ -230,13 +252,17 @@ class Nav2Executor(Node):
             self.get_logger().error(f'Cargo leg {self.current_leg_index} rejected!')
             self.finish_task(success=False)
             return
-            
+
+        self._current_goal_handle = goal_handle
         result_future = goal_handle.get_result_async()
         result_future.add_done_callback(self.cargo_leg_result_callback)
 
     def cargo_leg_result_callback(self, future):
+        self._current_goal_handle = None
+        if self._is_task_cancelled:
+            self._is_task_cancelled = False
+            return
         result = future.result().result
-        self.cmd_pub.publish(Twist())  # brakes
         
         # Check missed waypoints
         # The goal had 1 point: [0: End]
@@ -268,7 +294,6 @@ class Nav2Executor(Node):
              self.get_logger().info('Task Completed Successfully!')
              
         self.result_pub.publish(result_msg)
-        self.cmd_pub.publish(Twist())
 
 def main(args=None):
     rclpy.init(args=args)

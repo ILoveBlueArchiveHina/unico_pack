@@ -50,10 +50,6 @@ public:
             "/marker_publisher/markers", 1,
             std::bind(&MultiMarkerLanding::markers_callback, this, std::placeholders::_1));
             
-        state_sub_ = this->create_subscription<mavros_msgs::msg::State>(
-            "/mavros/state", 1,
-            std::bind(&MultiMarkerLanding::state_callback, this, std::placeholders::_1));
-            
         extended_state_sub_ = this->create_subscription<mavros_msgs::msg::ExtendedState>(
             "/mavros/extended_state", 1,
             std::bind(&MultiMarkerLanding::extended_state_callback, this, std::placeholders::_1));
@@ -70,6 +66,7 @@ public:
         
         // Timer (10Hz)
         timer_ = this->create_wall_timer(100ms, std::bind(&MultiMarkerLanding::control_loop, this));
+        ground_check_timer_ = this->create_wall_timer(1000ms, std::bind(&MultiMarkerLanding::ground_check_cb, this));
         
         last_valid_time_ = this->now();
         RCLCPP_INFO(this->get_logger(), "Multi-marker landing controller initialized");
@@ -83,7 +80,7 @@ private:
     const double DESCENT_SPEED = -0.1;
     
     const double Kp_xy = 0.3;
-    const double Kp_yaw = 0.02;
+    const double Kp_yaw = 0.015;
     
     const double ALIGNMENT_THRESHOLD_XY = 0.05;
     const double ALIGNMENT_THRESHOLD_YAW = 1.0;
@@ -116,12 +113,12 @@ private:
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr vel_pub_;
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr is_landed_pub_;
     rclcpp::Subscription<aruco_msgs::msg::MarkerArray>::SharedPtr marker_sub_;
-    rclcpp::Subscription<mavros_msgs::msg::State>::SharedPtr state_sub_;
     rclcpp::Subscription<mavros_msgs::msg::ExtendedState>::SharedPtr extended_state_sub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr altitude_sub_;
     rclcpp::Client<mavros_msgs::srv::CommandBool>::SharedPtr arming_client_;
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     rclcpp::TimerBase::SharedPtr timer_;
+    rclcpp::TimerBase::SharedPtr ground_check_timer_;
 
     void markers_callback(const aruco_msgs::msg::MarkerArray::SharedPtr msg) {
         detected_markers_.clear();
@@ -323,15 +320,27 @@ private:
         disarm_called_ = true;
     }
 
+    bool _is_on_ground() {
+        if (current_extended_state_.landed_state == mavros_msgs::msg::ExtendedState::LANDED_STATE_ON_GROUND){
+            return true;
+        }
+        else {
+            return false;
+        }
+
+    }
+
     void control_loop() {
         double dt_lost = (this->now() - last_valid_time_).seconds();
+        geometry_msgs::msg::Twist vel_cmd;
         
         if (dt_lost > 1.0) {
             if (!last_no_center_) {
-                RCLCPP_WARN(this->get_logger(), "🚨 標記訊號遺失 (%.2fs)！停止移動", dt_lost);
+                RCLCPP_WARN(this->get_logger(), "🚨 標記訊號遺失 (%.2fs)！垂直降落", dt_lost);
                 last_no_center_ = true;
             }
-            vel_pub_->publish(geometry_msgs::msg::Twist());
+            vel_cmd.linear.z = DESCENT_SPEED;
+            vel_pub_->publish(vel_cmd);
             marker_buffer_.clear();
             return;
         }
@@ -339,8 +348,10 @@ private:
         CenterData center;
         if (!get_smoothed_center(center)) {
             if (!last_no_center_) {
-                RCLCPP_WARN(this->get_logger(), "No valid landing center, hovering...");
+                RCLCPP_WARN(this->get_logger(), "No valid landing center, Slow landing...");
                 last_no_center_ = true;
+                vel_cmd.linear.z = DESCENT_SPEED;
+                vel_pub_->publish(vel_cmd);
             }
             return;
         }
@@ -348,8 +359,7 @@ private:
         
         check_alignment(center);
         bool xy_aligned = std::sqrt(center.x * center.x + center.y * center.y) < ALIGNMENT_THRESHOLD_XY;
-        
-        geometry_msgs::msg::Twist vel_cmd;
+
         if (aligned_done_) vel_cmd.linear.z = DESCENT_SPEED;
         
         vel_cmd.linear.x = -Kp_xy * center.x;
@@ -374,21 +384,19 @@ private:
         if (!std::isfinite(vel_cmd.angular.z)) vel_cmd.angular.z = 0.0;
         
         vel_pub_->publish(vel_cmd);
-        
-        // 著陸判斷
-        if (current_extended_state_.landed_state == mavros_msgs::msg::ExtendedState::LANDED_STATE_ON_GROUND) {
+    }
+
+    void ground_check_cb() {
+        if (_is_on_ground()) {
             vel_pub_->publish(geometry_msgs::msg::Twist());
             RCLCPP_INFO(this->get_logger(), "Extended State 確認已著陸 (ON_GROUND)");
             if (!disarm_called_) call_disarm();
         }
-        
         if (landing_complete_) {
             RCLCPP_INFO(this->get_logger(), "主程式檢測到降落完成，準備關閉");
             rclcpp::shutdown();
         }
     }
-
-    void state_callback(const mavros_msgs::msg::State::SharedPtr) {}
     
     void extended_state_callback(const mavros_msgs::msg::ExtendedState::SharedPtr msg) {
         current_extended_state_ = *msg;

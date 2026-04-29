@@ -14,7 +14,9 @@ using std::placeholders::_1;
 class NavVelocityTracker : public rclcpp::Node {
 public:
     NavVelocityTracker() : Node("nav_velocity_tracker"), tracking_active_(false) {
-        
+        declare_parameter<double>("yaw_align_threshold", 0.5);
+        yaw_align_threshold_ = get_parameter("yaw_align_threshold").as_double();
+
         // TF Listener 設定
         tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -47,6 +49,7 @@ private:
     double center_y_ = 0.0;
     const double angular_gain_ = 1.5;
     const double max_angular_vel_ = 0.5;
+    double yaw_align_threshold_;
 
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
@@ -115,6 +118,14 @@ private:
         double yaw_error = std::atan2(e_sin, e_cos);
         double angular_z = angular_gain_ * yaw_error;
         angular_z = std::clamp(angular_z, -max_angular_vel_, max_angular_vel_);
+
+        // 角度差過大時先原地旋轉，不轉發線速度
+        if (std::abs(yaw_error) > yaw_align_threshold_) {
+            geometry_msgs::msg::Twist rotate_cmd;
+            rotate_cmd.angular.z = angular_z;
+            cmd_pub_->publish(rotate_cmd);
+            return;
+        }
 
         // Velocity vector rotation
         geometry_msgs::msg::Twist new_cmd;

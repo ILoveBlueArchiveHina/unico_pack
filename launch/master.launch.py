@@ -25,8 +25,9 @@ def generate_launch_description():
 
         Node(
             package='unico_pack',
-            executable='fast_lio_lifecycle_wrapper',
-            prefix = ['taskset -c 4,5']
-        ),
+            executable='rosbag_lifecycle',
+            prefix = ['taskset -c 3']
+        )
+
     ])
     
