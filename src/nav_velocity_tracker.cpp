@@ -2,6 +2,7 @@
 #include <geometry_msgs/msg/twist.hpp>
 #include <geometry_msgs/msg/point.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>
+#include <std_msgs/msg/float32.hpp>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
 #include <tf2/LinearMath/Quaternion.h>
@@ -37,6 +38,10 @@ public:
             "/cmd_vel_nav", rclcpp::SystemDefaultsQoS(),
             std::bind(&NavVelocityTracker::cmd_vel_callback, this, _1));
 
+        // set_flight_altitude_sub_ = this->create_subscription<std_msgs::msg::Float32>(
+        //     "/set_flight_altitude", rclcpp::SystemDefaultsQoS(),
+        //     std::bind(&NavVelocityTracker::set_altitude_callback, this, _1));
+
         // 發布修正後的速度給飛控
         cmd_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
         
@@ -56,7 +61,11 @@ private:
     
     rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr center_sub_;
     rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_nav_sub_;
+    rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr set_flight_altitude_sub_;
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
+    // void set_altitude_callback(const std_msgs::msg::Float32::SharedPtr msg){
+    //     return;
+    // }
 
     void cmd_vel_callback(const geometry_msgs::msg::Twist::SharedPtr msg) {
         if (!tracking_active_) {

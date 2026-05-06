@@ -15,8 +15,8 @@ def generate_launch_description():
                 'home_pose_y': -2.05,
                 'rosbag_folder_path': '/home/uni-co-jetson/rosbag',
                 'mqtt_broker': '192.168.166.83'
-            }
-            ],
+            }],
+            prefix=['taskset -c 1,2,3']
         ),
 
         TimerAction(
@@ -26,6 +26,7 @@ def generate_launch_description():
             package='unico_pack',
             executable='mission_dispatcher_v2.py',
             output='screen',
+            prefix=['taskset -c 1,2,3']
             )]
         ),
         
@@ -36,19 +37,19 @@ def generate_launch_description():
             Node(
                 package='unico_pack',
                 executable='cmd_vel_bridge',
-                prefix=['taskset -c 3']
+                prefix=['taskset -c 1,2,3']
             ),
             Node(
                 package='unico_pack',
                 executable='nav_velocity_tracker',
-                prefix=['taskset -c 3']
+                prefix=['taskset -c 1,2,3']
             )]
         ),
 
         Node(
             package='unico_pack',
             executable='precision_landing_lifecycle',
-            prefix = ['taskset -c 3']
+            prefix = ['taskset -c 1,2,3']
         ),
 
         # Node(
@@ -60,6 +61,6 @@ def generate_launch_description():
         Node(
             package='unico_pack',
             executable='rosbag_lifecycle',
-            prefix = ['taskset -c 3']
+            prefix = ['taskset -c 1,2,3']
         )
     ])

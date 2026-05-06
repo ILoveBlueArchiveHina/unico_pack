@@ -5,17 +5,19 @@ import shutil
 from rclpy.node import Node
 import json
 import paho.mqtt.client as mqtt
+import subprocess
 import os
+import signal
 from datetime import datetime
 from rclpy.qos import qos_profile_sensor_data
 
 from campus_delivery_msgs.msg import NavTask, NavResult
-from geometry_msgs.msg import Pose2D
+from geometry_msgs.msg import Pose2D, PoseStamped, TransformStamped
 from sensor_msgs.msg import BatteryState
-from std_msgs.msg import Header, Bool, Float32
+from std_msgs.msg import Header, Bool
 from nav2_msgs.action import NavigateToPose
-from action_msgs.msg import GoalStatus
 from rclpy.action import ActionClient
+from tf2_ros import StaticTransformBroadcaster
 from mavros_msgs.srv import CommandTOL, CommandBool, SetMode
 from mavros_msgs.msg import ExtendedState, State 
 from lifecycle_msgs.srv import ChangeState
@@ -25,10 +27,6 @@ from rcl_interfaces.msg import Parameter, ParameterValue, ParameterType
 
 
 LOW_BATTERY_THRESHOLD = 0.5
-RETURN_HOME_ALT = 3.0
-INSPECTION_ALT = 1.5
-PROCESS_STATE_INSPECTION = "INSPECTION"
-PROCESS_STATE_RETURN_HOME = "RETURN_HOME"
 
 class ManagementNode(Node):
     def __init__(self):
@@ -49,8 +47,6 @@ class ManagementNode(Node):
         self.task_publisher_ = self.create_publisher(NavTask, "navigation_tasks", 1)
         self.start_vel_bridge_signal_pub = self.create_publisher(Bool, 'start_vel_bridging', 1)
         self.cancel_current_task_pub = self.create_publisher(Bool, "cancel_navigation", 1)
-        self.set_flight_altitude_pub = self.create_publisher(Float32, "set_flight_altitude", 1)
-        
 
         # ROS2 topics (subscriber)
         self.create_subscription(NavResult, 'navigation_result', self.result_callback, 1)
@@ -58,9 +54,8 @@ class ManagementNode(Node):
         self.create_subscription(State, '/mavros/state', self.mavros_state_callback, 1)
         self.create_subscription(Bool, 'is_landed', self.is_landed_subscribe, 1)
         self.create_subscription(Bool, 'ready_to_record_rosbag', self.ready_to_record_rosbag_signal_sub, 1)
-        self.create_subscription(Bool, 'set_flight_alt_done', self.set_flight_altitude_callback, 1)
         self.create_subscription(BatteryState, '/mavros/battery', self.battery_callback, qos_profile_sensor_data)
-        
+        self.create_subscription(Pose2D, '/initial_tf', self.initial_tf_callback, 1)
 
         # ROS2 client
         self._pl_change_state_cli = self.create_client(ChangeState, '/precision_landing_node/change_state')
@@ -78,9 +73,12 @@ class ManagementNode(Node):
         self.create_timer(5.0, self._status_report)
         self.set_ready_timer_ = self.create_timer(3.0, self._set_ready)
 
+        # TF Broadcaster
+        self.static_tf = StaticTransformBroadcaster(self)
+
         # Intialize variables
         self.task_queue = []
-        self.complite_task_path = []
+        self.complite_tasks = []
         self.remaining_tasks = []
         self.current_task = None
         self.is_processing = False
@@ -94,7 +92,6 @@ class ManagementNode(Node):
         self.mavros_state = State()
         self.mavros_extended_state = ExtendedState()
         self.current_status = 'offline'
-        self.process_state = "NONE"
         self._takeoff_altitude = 1.0
         self._takeoff_poll_timer = None
         self._takeoff_poll_count = 0
@@ -143,10 +140,9 @@ class ManagementNode(Node):
 
         return remaining_task_ids
 
-    
-    # -------------------------------------------------------------------#
-    #  Subscription callbacks                                                         #
-    #--------------------------------------------------------------------#
+    # ------------------------------------------------------------------ #
+    #  State helpers                                                       #
+    # ------------------------------------------------------------------ #
 
     def mavros_extended_state_callback(self, msg):
         self.mavros_extended_state = msg
@@ -154,22 +150,22 @@ class ManagementNode(Node):
     def mavros_state_callback(self, msg):
         self.mavros_state = msg
 
-    def battery_callback(self, msg):
-        self.battery_percentage = msg.percentage
-
-    def is_landed_subscribe(self, msg):
-        if msg.data:
-            self.precision_landing("off")
-    
-    # ------------------------------------------------------------------ #
-    #  State helpers                                                       #
-    # ------------------------------------------------------------------ #
-
     def _is_in_air(self):
         return self.mavros_extended_state.landed_state == ExtendedState.LANDED_STATE_IN_AIR
 
     def _current_flight_mode(self):
         return self.mavros_state.mode
+
+    def initial_tf_callback(self, msg):
+        t = TransformStamped()
+        t.header.stamp = self.get_clock().now().to_msg()
+        t.header.frame_id = 'map'
+        t.child_frame_id = 'camera_init'
+        t.transform.translation.x = msg.x
+        t.transform.translation.y = msg.y
+        t.transform.translation.z = msg.theta
+        t.transform.rotation.w = 1.0
+        self.static_tf.sendTransform(t)
 
     def _set_ready(self):
         """ Filter out old messages remaining on MQTT. """
@@ -358,7 +354,7 @@ class ManagementNode(Node):
         self.current_status = 'error'
 
     # ------------------------------------------------------------------ #
-    #  Task execution & result                                           #
+    #  Task execution & result                                             #
     # ------------------------------------------------------------------ #
 
     def _execute_task(self, task):
@@ -385,12 +381,20 @@ class ManagementNode(Node):
 
         if msg.result in (1, 2):
             self.is_processing = False
-            self.complite_task_path.append(self.current_task.rosbag_path)
+            self.current_status = 'idle'
+            self.complite_tasks.append(msg.task_id)
             self.process_queue()
 
     # ------------------------------------------------------------------ #
     #  Sensors & status                                                    #
     # ------------------------------------------------------------------ #
+
+    def battery_callback(self, msg):
+        self.battery_percentage = msg.percentage
+
+    def is_landed_subscribe(self, msg):
+        if msg.data:
+            self.precision_landing("off")
 
     def ready_to_record_rosbag_signal_sub(self, msg):
         if msg.data:
@@ -436,79 +440,13 @@ class ManagementNode(Node):
     # ------------------------------------------------------------------ #
     #  Return to Home                                                      #
     # ------------------------------------------------------------------ #
-    # todo: 用進程狀態參數來決定飛到安全區後要回家還是巡檢
-    def _fly_to_safe_zone(self, process_state):
-        self.process_state = process_state
-        goal_msg = NavigateToPose.Goal()
-        goal_msg.pose.header.frame_id = 'map'
-        goal_msg.pose.header.stamp = self.get_clock().now().to_msg()
-        goal_msg.pose.pose.position.x = 15.0
-        goal_msg.pose.pose.position.y = -6.0
-        goal_msg.pose.pose.orientation.w = 1.0
-
-        future = self.nav_to_pose_client.send_goal_async(goal_msg)
-
-        def _fly_to_safe_zone_callback(f):
-            goal_handle = f.result()
-            if not goal_handle.accepted:
-                self.get_logger().error("fly to safe-zone rejected!")
-                self.is_processing = False
-                self.is_returning_home = False
-                self._cancel_current_task()
-                self.return_home()
-                return
-
-            goal_handle.get_result_async().add_done_callback(_fly_to_safe_zone_done)
-
-        def _fly_to_safe_zone_done(f):
-            status = f.result().status
-            if status != GoalStatus.STATUS_SUCCEEDED:
-                self.get_logger().error(f"fly to safe-zone failed (status={status}). Returning home.")
-                self.return_home()
-                return
-
-            self.get_logger().info("Arrived at safe zone.")
-            if process_state == PROCESS_STATE_INSPECTION:
-                self._set_flight_altitude(INSPECTION_ALT)
-
-            elif process_state == PROCESS_STATE_RETURN_HOME:
-                self._set_flight_altitude(RETURN_HOME_ALT)
-
-            return
-
-            # todo: 用進程狀態參數來決定飛到安全區後要回家還是巡檢
-
-        future.add_done_callback(_fly_to_safe_zone_callback)
-
-    def set_flight_altitude_callback(self, msg):
-        if msg.data:
-            if self.process_state == "INSPECTION":
-                # todo: execute inspection process
-                self._execute_task(self.current_task)
-                return
-
-            elif self.process_state == "RETURN_HOME":
-                self.return_home()
-
-    def _set_flight_altitude(self, process_state):
-        self.process_state = process_state
-        msg = Float32()
-        if process_state == "RETURN_HOME":
-            msg.data = RETURN_HOME_ALT
-            
-        elif process_state == "INSPECTION":
-            msg.data = INSPECTION_ALT
-        
-        self.set_flight_altitude_pub.publish(msg)
 
     def return_home(self):
         if self.is_returning_home:
             return
 
-        self.is_returning_home = True
         if not self._is_in_air():
             self.get_logger().info("Drone already on ground. Skipping RTH.")
-            
             return
 
         if not self.nav_to_pose_client.wait_for_server(timeout_sec=2.0):
@@ -518,6 +456,7 @@ class ManagementNode(Node):
 
         self.get_logger().info("Initiating Return to Home...")
         self.is_processing = True
+        self.is_returning_home = True
 
         goal_msg = NavigateToPose.Goal()
         goal_msg.pose.header.frame_id = 'map'
@@ -533,10 +472,10 @@ class ManagementNode(Node):
         goal_handle = future.result()
         threading.Thread(
             target=self._upload_rosbag_to_nas,
-            args=(self.complite_task_path,),
+            args=(self.complite_tasks,),
             daemon=True
         ).start()
-        self.complite_task_path = []
+        self.complite_tasks = []
 
         if not goal_handle.accepted:
             self.get_logger().error("Return to Home rejected!")
@@ -551,7 +490,9 @@ class ManagementNode(Node):
 
     def _home_result_callback(self, future):
         self.get_logger().info("Arrived at Home. Starting precision landing...")
-        self.precision_landing("on")
+        if not self.precision_landing("on"):
+            self.force_landing()
+        self.current_status = 'charging'
         self.is_processing = False
         self.is_returning_home = False
 
@@ -567,16 +508,17 @@ class ManagementNode(Node):
         req = SetMode.Request()
         req.custom_mode = 'LAND'
         future = self.mavros_mode_client.call_async(req)
-        self.current_status = 'error'
-        
-        def _on_done(f):
-            try:
-                if not f.result().mode_sent:
-                    self.get_logger().error("Landing failed.")
-            except Exception as e:
-                self.get_logger().error(f"Landing error: {e}")
+        future.add_done_callback(self._set_land_mode_responese)
 
-        future.add_done_callback(_on_done)
+    def _set_land_mode_responese(self, future):
+        try:
+            if not future.result().mode_sent:
+                self.get_logger().error("Landing failed.")
+                return
+        except Exception as e:
+            self.get_logger().error(f"Landing error: {e}")
+            return
+        
 
     # ------------------------------------------------------------------ #
     #  Notifications & termination                                         #
@@ -607,28 +549,20 @@ class ManagementNode(Node):
     #  Subprocesses                                                      #
     # ------------------------------------------------------------------ #
 
-    def _lifecycle_transition(self, client, transition_id, label, done_cb=None):
+    def _lifecycle_transition(self, client, transition_id, label):
         if not client.wait_for_service(timeout_sec=2.0):
             self.get_logger().error(f"{label} change_state service not available.")
-            if done_cb:
-                done_cb(False)
-            return
+            return False
         req = ChangeState.Request()
         req.transition.id = transition_id
         future = client.call_async(req)
-
-        def _on_done(f):
-            result = f.result()
-            success = result is not None and result.success
-            if success:
-                self.get_logger().info(f"{label} transition OK.")
-            else:
-                self.get_logger().error(f"{label} transition FAILED.")
-                self.force_landing()
-            if done_cb:
-                done_cb(success)
-
-        future.add_done_callback(_on_done)
+        rclpy.spin_until_future_complete(self, future, timeout_sec=5.0)
+        result = future.result()
+        if result is not None and result.success:
+            self.get_logger().info(f"{label} transition OK.")
+            return True
+        self.get_logger().error(f"{label} transition FAILED.")
+        return False
 
     def precision_landing(self, action="on"):
         transition_id = {
@@ -638,8 +572,7 @@ class ManagementNode(Node):
         if transition_id is None:
             self.get_logger().warn(f"Unknown action for precision_landing: {action}")
             return
-        self._lifecycle_transition(self._pl_change_state_cli, transition_id, "PrecisionLanding")
-            
+        return self._lifecycle_transition(self._pl_change_state_cli, transition_id, "PrecisionLanding")
 
     def record_rosbag(self, action="on", path="default"):
         transition_id = {
@@ -675,10 +608,10 @@ class ManagementNode(Node):
             daemon=True
         ).start()
 
-    def _upload_rosbag_to_nas(self, complite_task_path):
-        for task_path in complite_task_path:
-            src = f"{self.rosbag_folder_path}/{task_path}"
-            dst = f"{self.nas_mount_path}/{task_path}"
+    def _upload_rosbag_to_nas(self, task_list):
+        for task_id in task_list:
+            src = f"{self.rosbag_folder_path}/{task_id}"
+            dst = f"{self.nas_mount_path}/{task_id}"
 
             # 先確認 NAS 有掛載
             if not os.path.ismount(self.nas_mount_path):
@@ -686,7 +619,6 @@ class ManagementNode(Node):
                 return
 
             try:
-                os.makedirs(os.path.dirname(dst), exist_ok=True)
                 shutil.copytree(src, dst)
                 src_size = sum(f.stat().st_size for f in Path(src).rglob('*') if f.is_file())
                 dst_size = sum(f.stat().st_size for f in Path(dst).rglob('*') if f.is_file())

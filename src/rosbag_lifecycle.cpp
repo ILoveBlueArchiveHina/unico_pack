@@ -11,7 +11,7 @@ using rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface;
 class RosbagLifecycle : public rclcpp_lifecycle::LifecycleNode {
 public:
     RosbagLifecycle() : rclcpp_lifecycle::LifecycleNode("rosbag_node"), child_pid_(-1) {
-        declare_parameter<std::string>("output_path", "/tmp/rosbag");
+        declare_parameter<std::string>("output_path", "/home/uni-co-jetson/rosbag");
         declare_parameter<std::vector<std::string>>("topics", {
             "/zed/zed_node/rgb/color/rect/camera_info",
             "/zed/zed_node/rgb/color/rect/image",
@@ -40,7 +40,7 @@ public:
         topics_ = get_parameter("topics").as_string_array();
 
         // Build argv for execlp: ros2 bag record -o <path> <topics...>
-        std::vector<std::string> args = {"ros2", "bag", "record", "-o", output_path_};
+        std::vector<std::string> args = {"taskset", "-c", "1,2,3", "ros2", "bag", "record", "-o", output_path_};
         for (const auto & t : topics_) args.push_back(t);
 
         child_pid_ = fork();
@@ -53,7 +53,7 @@ public:
             std::vector<char *> argv;
             for (auto & s : args) argv.push_back(s.data());
             argv.push_back(nullptr);
-            execvp("ros2", argv.data());
+            execvp("taskset", argv.data());
             exit(1);
         }
 
