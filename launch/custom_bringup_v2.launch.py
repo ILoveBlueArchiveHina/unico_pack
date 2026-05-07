@@ -38,7 +38,7 @@ def generate_launch_description():
             name='planner_server',
             output='screen',
             parameters=[params_file, {'use_sim_time': use_sim_time}],
-            prefix=['taskset -c 1,2'],
+            prefix=['taskset -c 1,2,3'],
         ),
 
         Node(
@@ -50,7 +50,7 @@ def generate_launch_description():
             remappings=[
                 ('cmd_vel', 'cmd_vel_nav'),
             ],
-            prefix=['taskset -c 1,2'],
+            prefix=['taskset -c 1,2,3'],
         ),
 
         Node(
@@ -59,7 +59,7 @@ def generate_launch_description():
             name='behavior_server',
             output='screen',
             parameters=[params_file, {'use_sim_time': use_sim_time}],
-            prefix=['taskset -c 1,2'],
+            prefix=['taskset -c 1,2,3'],
         ),
 
         Node(
@@ -68,7 +68,7 @@ def generate_launch_description():
             name='waypoint_follower',
             output='screen',
             parameters=[params_file, {'use_sim_time': use_sim_time}],
-            prefix=['taskset -c 1,2'],
+            prefix=['taskset -c 1,2,3'],
         ),
 
         Node(
@@ -81,7 +81,7 @@ def generate_launch_description():
                 'default_nav_to_pose_bt_xml': PathJoinSubstitution(["/home", user, "ros2_ws/src/unico_pack/config/drone_nav.xml"]),
                 'default_nav_through_poses_bt_xml': PathJoinSubstitution(["/home", user, "ros2_ws/src/unico_pack/config/drone_nav_through_poses.xml"])
                 }],
-            prefix=['taskset -c 1,2'],
+            prefix=['taskset -c 1,2,3'],
             ),
 
         Node(
@@ -93,7 +93,7 @@ def generate_launch_description():
                 'use_sim_time': use_sim_time,
                 'yaml_filename': map_file,
             }],
-            prefix=['taskset -c 1,2'],
+            prefix=['taskset -c 1,2,3'],
         ),
 
         Node(
@@ -110,6 +110,22 @@ def generate_launch_description():
                 '--yaw', '0.0',
                 '--frame-id', 'map',
                 '--child-frame-id', 'camera_init']
+        ),
+
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='static_tf_zed',
+            output='screen',
+            arguments=[
+                '--x', '0.05',
+                '--y', '0.0',
+                '--z', '-0.2',
+                '--roll', '0.0',
+                '--pitch', '0.0',
+                '--yaw', '0.0',
+                '--frame-id', 'body',
+                '--child-frame-id', 'zed_camera_link']
         ),
 
     # TimerAction(
@@ -150,7 +166,7 @@ def generate_launch_description():
                         # 'velocity_smoother'
                     ]
                 }],
-                prefix=['taskset -c 1,2'],
+                prefix=['taskset -c 1,2,3'],
             )
         ]
     )

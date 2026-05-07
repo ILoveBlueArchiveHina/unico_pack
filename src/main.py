@@ -688,10 +688,10 @@ class ManagementNode(Node):
             try:
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 shutil.copytree(src, dst)
-                src_size = sum(f.stat().st_size for f in Path(src).rglob('*') if f.is_file())
-                dst_size = sum(f.stat().st_size for f in Path(dst).rglob('*') if f.is_file())
-                if src_size != dst_size:
-                    raise RuntimeError(f"Size mismatch: {src_size} vs {dst_size}")
+                # src_size = sum(f.stat().st_size for f in Path(src).rglob('*') if f.is_file())
+                # dst_size = sum(f.stat().st_size for f in Path(dst).rglob('*') if f.is_file())
+                # if src_size != dst_size:
+                #     raise RuntimeError(f"Size mismatch: {src_size} vs {dst_size}")
 
                 self.get_logger().info(f"Rosbag uploaded: {task_id}")
                 self.send_feedback(task_id=task_id, result=1, failed_faces=[])
