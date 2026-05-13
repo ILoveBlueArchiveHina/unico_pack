@@ -11,6 +11,7 @@ from rclpy.qos import qos_profile_sensor_data
 
 from campus_delivery_msgs.msg import NavTask, NavResult
 from geometry_msgs.msg import Pose2D
+from geographic_msgs.msg import GeoPointStamped
 from sensor_msgs.msg import BatteryState
 from std_msgs.msg import Header, Bool, Float32
 from nav2_msgs.action import NavigateToPose
@@ -27,6 +28,8 @@ from rcl_interfaces.msg import Parameter, ParameterValue, ParameterType
 LOW_BATTERY_THRESHOLD = 0.5
 RETURN_HOME_ALT = 3.0
 INSPECTION_ALT = 1.5
+SAFE_ZONE_X = 15.0
+SAFE_ZONE_Y = -6.0
 PROCESS_STATE_INSPECTION = "INSPECTION"
 PROCESS_STATE_RETURN_HOME = "RETURN_HOME"
 
@@ -39,17 +42,23 @@ class ManagementNode(Node):
         self.declare_parameter("home_pose_y", 0.0)
         self.declare_parameter("rosbag_folder_path", "/home/uni-co-jetson/rosbag")
         self.declare_parameter("mqtt_broker", "192.168.166.83")
+        self.declare_parameter("safe_zone_x", 15.0)
+        self.declare_parameter("safe_zone_y", -6.0)
 
         self.home_pose_x = self.get_parameter("home_pose_x").value
         self.home_pose_y = self.get_parameter("home_pose_y").value
         self.rosbag_folder_path = self.get_parameter("rosbag_folder_path").value
         self.mqtt_broker = self.get_parameter("mqtt_broker").value
+        self.safe_zone_x = self.get_parameter("safe_zone_x").value
+        self.safe_zone_y = self.get_parameter("safe_zone_y").value
 
         # ROS2 topics (publisher)
         self.task_publisher_ = self.create_publisher(NavTask, "navigation_tasks", 1)
         self.start_vel_bridge_signal_pub = self.create_publisher(Bool, 'start_vel_bridging', 1)
         self.cancel_current_task_pub = self.create_publisher(Bool, "cancel_navigation", 1)
         self.set_flight_altitude_pub = self.create_publisher(Float32, "set_flight_altitude", 1)
+        self._gp_origin_pub = self.create_publisher(
+            GeoPointStamped, '/mavros/global_position/set_gp_origin', 1)  # Setting EKF origin
         
 
         # ROS2 topics (subscriber)
@@ -129,7 +138,7 @@ class ManagementNode(Node):
         self.is_processing = False
         self.record_rosbag("off")
         self._cancel_current_task()
-        self.return_home()
+        self._fly_to_safe_zone(PROCESS_STATE_RETURN_HOME)
 
     def _cancel_current_task(self):
         msg = Bool()
@@ -145,7 +154,7 @@ class ManagementNode(Node):
 
     
     # -------------------------------------------------------------------#
-    #  Subscription callbacks                                                         #
+    #  Subscription callbacks                                            #
     #--------------------------------------------------------------------#
 
     def mavros_extended_state_callback(self, msg):
@@ -175,6 +184,7 @@ class ManagementNode(Node):
         """ Filter out old messages remaining on MQTT. """
         self.set_ready_timer_.destroy()
         if not self.ready_receive_mqtt:
+            self._set_ekf_origin()
             self.ready_receive_mqtt = True
             self.current_status = 'idle'
             self.get_logger().info("Manager is now ready to accept tasks.")
@@ -244,7 +254,7 @@ class ManagementNode(Node):
         if not self.task_queue:
             if self._is_in_air():
                 self.get_logger().info("Queue empty. Returning home.")
-                self.return_home()
+                self._fly_to_safe_zone(PROCESS_STATE_RETURN_HOME)
             return
 
         self.is_processing = True
@@ -273,89 +283,99 @@ class ManagementNode(Node):
         req = SetMode.Request()
         req.custom_mode = 'GUIDED'
         future = self.mavros_mode_client.call_async(req)
-        future.add_done_callback(self._on_mode_set)
 
-    def _on_mode_set(self, future):
-        try:
-            if not future.result().mode_sent:
-                self.get_logger().error("SetMode GUIDED failed. Aborting task.")
+        def _call_mode_response(future):
+            try:
+                if not future.result().mode_sent:
+                    self.get_logger().error("SetMode GUIDED failed. Aborting task.")
+                    self._abort_flight_sequence()
+                    return
+            except Exception as e:
+                self.get_logger().error(f"SetMode error: {e}")
                 self._abort_flight_sequence()
                 return
-        except Exception as e:
-            self.get_logger().error(f"SetMode error: {e}")
-            self._abort_flight_sequence()
-            return
 
-        self.get_logger().info("Mode GUIDED. Arming drone...")
+            self.get_logger().info("Mode GUIDED. Arming drone...")
 
-        if not self.mavros_arm_client.wait_for_service(timeout_sec=3.0):
-            self.get_logger().error("Arming service unavailable. Aborting task.")
-            self._abort_flight_sequence()
-            return
-
-        req = CommandBool.Request()
-        req.value = True
-        future = self.mavros_arm_client.call_async(req)
-        future.add_done_callback(self._on_armed)
-
-    def _on_armed(self, future):
-        try:
-            if not future.result().success:
-                self.get_logger().error("Arming failed. Aborting task.")
+            if not self.mavros_arm_client.wait_for_service(timeout_sec=3.0):
+                self.get_logger().error("Arming service unavailable. Aborting task.")
                 self._abort_flight_sequence()
                 return
-        except Exception as e:
-            self.get_logger().error(f"Arming error: {e}")
-            self._abort_flight_sequence()
-            return
 
-        self.get_logger().info(f"Armed. Taking off to {self._takeoff_altitude} m...")
+            req = CommandBool.Request()
+            req.value = True
+            future = self.mavros_arm_client.call_async(req)
+            future.add_done_callback(_call_armed_response)
 
-        if not self.mavros_takeoff_client.wait_for_service(timeout_sec=3.0):
-            self.get_logger().error("Takeoff service unavailable. Aborting task.")
-            self._abort_flight_sequence()
-            return
-
-        req = CommandTOL.Request()
-        req.altitude = float(self._takeoff_altitude)
-        req.min_pitch = 0.0
-        req.yaw = 0.0
-        req.latitude = 0.0
-        req.longitude = 0.0
-        future = self.mavros_takeoff_client.call_async(req)
-        future.add_done_callback(self._on_takeoff_sent)
-
-    def _on_takeoff_sent(self, future):
-        try:
-            if not future.result().success:
-                self.get_logger().error("Takeoff command rejected. Aborting task.")
+        def _call_armed_response(future):
+            try:
+                if not future.result().success:
+                    self.get_logger().error("Arming failed. Aborting task.")
+                    self._abort_flight_sequence()
+                    return
+            except Exception as e:
+                self.get_logger().error(f"Arming error: {e}")
                 self._abort_flight_sequence()
                 return
-        except Exception as e:
-            self.get_logger().error(f"Takeoff error: {e}")
-            self._abort_flight_sequence()
-            return
 
-        self.get_logger().info("Takeoff command accepted. Waiting for altitude...")
-        self._takeoff_poll_count = 0
-        self._takeoff_poll_timer = self.create_timer(1, self._poll_altitude)
+            self.get_logger().info(f"Armed. Taking off to {self._takeoff_altitude} m...")
 
-    def _poll_altitude(self):
-        """One-shot poll: cancel timer once airborne or timed out (10 s)."""
-        self._takeoff_poll_count += 1
+            if not self.mavros_takeoff_client.wait_for_service(timeout_sec=3.0):
+                self.get_logger().error("Takeoff service unavailable. Aborting task.")
+                self._abort_flight_sequence()
+                return
 
-        if self._is_in_air():
-            self._takeoff_poll_timer.destroy()
-            self.get_logger().info("Drone airborne. Executing task.")
-            self._execute_task(self.current_task)
-        elif self._takeoff_poll_count >= 20:
-            self._takeoff_poll_timer.destroy()
-            self.get_logger().error("Timed out waiting for takeoff. Aborting task.")
-            self._abort_flight_sequence()
+            req = CommandTOL.Request()
+            req.altitude = float(self._takeoff_altitude)
+            req.min_pitch = 0.0
+            req.yaw = 0.0
+            req.latitude = 0.0
+            req.longitude = 0.0
+            future = self.mavros_takeoff_client.call_async(req)
+            future.add_done_callback(_call_takeoff_response)
+
+        def _call_takeoff_response(future):
+            try:
+                if not future.result().success:
+                    self.get_logger().error("Takeoff command rejected. Aborting task.")
+                    self._abort_flight_sequence()
+                    return
+            except Exception as e:
+                self.get_logger().error(f"Takeoff error: {e}")
+                self._abort_flight_sequence()
+                return
+
+            self.get_logger().info("Takeoff command accepted. Waiting for altitude...")
+            self._takeoff_poll_count = 0
+            self._takeoff_poll_timer = self.create_timer(1, _poll_altitude)
+
+        def _poll_altitude():
+            """One-shot poll: cancel timer once airborne or timed out (10 s)."""
+            self._takeoff_poll_count += 1
+
+            if self._is_in_air():
+                self._takeoff_poll_timer.destroy()
+                self.get_logger().info("Drone airborne. Executing task.")
+                self._fly_to_safe_zone(PROCESS_STATE_INSPECTION)
+            elif self._takeoff_poll_count >= 20:
+                self._takeoff_poll_timer.destroy()
+                self.get_logger().error("Timed out waiting for takeoff. Aborting task.")
+                self._abort_flight_sequence()
+
+        future.add_done_callback(_call_mode_response)
 
     def _abort_flight_sequence(self):
         self.is_processing = False
         self.current_status = 'error'
+
+    def _set_ekf_origin(self):
+        msg = GeoPointStamped()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.position.latitude  = 22.6
+        msg.position.longitude = 120.288
+        msg.position.altitude  = 10.0
+        self._gp_origin_pub.publish(msg)
+        self.get_logger().info("EKF global origin set.")
 
     # ------------------------------------------------------------------ #
     #  Task execution & result                                           #
@@ -442,8 +462,8 @@ class ManagementNode(Node):
         goal_msg = NavigateToPose.Goal()
         goal_msg.pose.header.frame_id = 'map'
         goal_msg.pose.header.stamp = self.get_clock().now().to_msg()
-        goal_msg.pose.pose.position.x = 15.0
-        goal_msg.pose.pose.position.y = -6.0
+        goal_msg.pose.pose.position.x = self.safe_zone_x
+        goal_msg.pose.pose.position.y = self.safe_zone_y
         goal_msg.pose.pose.orientation.w = 1.0
 
         future = self.nav_to_pose_client.send_goal_async(goal_msg)
@@ -463,8 +483,8 @@ class ManagementNode(Node):
         def _fly_to_safe_zone_done(f):
             status = f.result().status
             if status != GoalStatus.STATUS_SUCCEEDED:
-                self.get_logger().error(f"fly to safe-zone failed (status={status}). Returning home.")
-                self.return_home()
+                self.get_logger().error(f"fly to safe-zone failed (status={status}). Force landing.")
+                self.force_landing()
                 return
 
             self.get_logger().info("Arrived at safe zone.")
@@ -527,33 +547,34 @@ class ManagementNode(Node):
         goal_msg.pose.pose.orientation.w = 1.0
 
         future = self.nav_to_pose_client.send_goal_async(goal_msg)
-        future.add_done_callback(self._home_response_callback)
 
-    def _home_response_callback(self, future):
-        goal_handle = future.result()
-        threading.Thread(
-            target=self._upload_rosbag_to_nas,
-            args=(self.complite_task_path,),
-            daemon=True
-        ).start()
-        self.complite_task_path = []
+        def _home_response_callback(f):
+            goal_handle = f.result()
+            threading.Thread(
+                target=self._upload_rosbag_to_nas,
+                args=(self.complite_task_path,),
+                daemon=True
+            ).start()
+            self.complite_task_path = []
 
-        if not goal_handle.accepted:
-            self.get_logger().error("Return to Home rejected!")
+            if not goal_handle.accepted:
+                self.get_logger().error("Return to Home rejected!")
+                self.is_processing = False
+                self.is_returning_home = False
+                self._cancel_current_task()
+                self.force_landing()
+                return
+
+            self.get_logger().info("Return to Home accepted.")
+            goal_handle.get_result_async().add_done_callback(_home_result_callback)
+
+        def _home_result_callback(f):
+            self.get_logger().info("Arrived at Home. Starting precision landing...")
+            self.precision_landing("on")
             self.is_processing = False
             self.is_returning_home = False
-            self._cancel_current_task()
-            self.force_landing()
-            return
 
-        self.get_logger().info("Return to Home accepted.")
-        goal_handle.get_result_async().add_done_callback(self._home_result_callback)
-
-    def _home_result_callback(self, future):
-        self.get_logger().info("Arrived at Home. Starting precision landing...")
-        self.precision_landing("on")
-        self.is_processing = False
-        self.is_returning_home = False
+        future.add_done_callback(_home_response_callback)
 
     def force_landing(self):
         if not self._is_in_air():
@@ -601,7 +622,7 @@ class ManagementNode(Node):
         # A future improvement is to publish a cancel signal to mission_dispatcher.
 
         self.send_cancelled_task_list(cancelled_ids)
-        self.return_home()
+        self._fly_to_safe_zone(PROCESS_STATE_RETURN_HOME)
 
     # ------------------------------------------------------------------ #
     #  Subprocesses                                                      #

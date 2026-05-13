@@ -1,18 +1,27 @@
+import os
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, TimerAction
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
+    unico_pack_path = get_package_share_directory('unico_pack')
+    default_params_file = os.path.join(unico_pack_path, 'config', 'custom_bringup_v6.yaml')
+    default_map_file = os.path.join(unico_pack_path, 'maps', 'warehouse_2d_map.yaml')
+    default_xml_file = os.path.join(unico_pack_path, 'config', 'drone_nav.xml')
+
     params_file = LaunchConfiguration('params_file')
     use_sim_time = LaunchConfiguration('use_sim_time')
     map_file = LaunchConfiguration('map_file')
     user = LaunchConfiguration('user')
-
+    map_odom_tf_x = LaunchConfiguration('map_odom_tf_x')
+    map_odom_tf_y = LaunchConfiguration('map_odom_tf_y')
+    map_odom_tf_z = LaunchConfiguration('map_odom_tf_z')
     
     declare_params = DeclareLaunchArgument(
         'params_file',
-        default_value='/home/uni-co-jetson/ros2_ws/src/unico_pack/config/custom_bringup_v5.yaml'
+        default_value=default_params_file
     )
 
     declare_sim = DeclareLaunchArgument(
@@ -22,12 +31,27 @@ def generate_launch_description():
 
     declare_map = DeclareLaunchArgument(
         'map_file',
-        default_value="/home/uni-co-jetson/ros2_ws/src/unico_pack/maps/warehouse_2d_map.yaml"
+        default_value=default_map_file
     )
 
     declare_user = DeclareLaunchArgument(
         'user',
         default_value="uni-co-jetson"
+    )
+
+    declare_map_odom_tf_x = DeclareLaunchArgument(
+        'map_odom_tf_x',
+        default_value='2.0'
+    )
+
+    declare_map_odom_tf_y = DeclareLaunchArgument(
+        'map_odom_tf_y',
+        default_value='-2.05'
+    )
+
+    declare_map_odom_tf_z = DeclareLaunchArgument(
+        'map_odom_tf_z',
+        default_value='2.05'
     )
 
 
@@ -78,8 +102,8 @@ def generate_launch_description():
             output='screen',
             parameters=[params_file, {
                 'use_sim_time': use_sim_time,
-                'default_nav_to_pose_bt_xml': PathJoinSubstitution(["/home", user, "ros2_ws/src/unico_pack/config/drone_nav.xml"]),
-                'default_nav_through_poses_bt_xml': PathJoinSubstitution(["/home", user, "ros2_ws/src/unico_pack/config/drone_nav_through_poses.xml"])
+                'default_nav_to_pose_bt_xml': default_xml_file,
+                'default_nav_through_poses_bt_xml': os.path.join(unico_pack_path, 'config', 'drone_nav_through_poses.xml'),
                 }],
             prefix=['taskset -c 1,2,3'],
             ),
@@ -102,9 +126,9 @@ def generate_launch_description():
             name='static_tf_map',
             output='screen',
             arguments=[
-                '--x', '2.0',
-                '--y', '-2.05',
-                '--z', '2.05',
+                '--x', map_odom_tf_x,
+                '--y', map_odom_tf_y,
+                '--z', map_odom_tf_z,
                 '--roll', '0.0',
                 '--pitch', '0.0',
                 '--yaw', '0.0',
@@ -155,7 +179,7 @@ def generate_launch_description():
                 output='screen',
                 parameters=[{
                     'use_sim_time': use_sim_time,
-                    'autostart': False,
+                    'autostart': True,
                     'node_names': [
                         'map_server',
                         'planner_server',
@@ -172,4 +196,7 @@ def generate_launch_description():
     )
     
 
-    return LaunchDescription([declare_params, declare_sim, declare_map, declare_user] + nodes + [lifecycle_manager])
+    return LaunchDescription([
+        declare_params, declare_sim, declare_map, declare_user,
+        declare_map_odom_tf_x, declare_map_odom_tf_y, declare_map_odom_tf_z,
+    ] + nodes + [lifecycle_manager])

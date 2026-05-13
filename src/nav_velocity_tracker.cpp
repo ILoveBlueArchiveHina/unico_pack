@@ -1,16 +1,20 @@
 #include <rclcpp/rclcpp.hpp>
+#include <optional>
+#include <cmath>
+#include <algorithm>
+
 #include <geometry_msgs/msg/twist.hpp>
 #include <geometry_msgs/msg/point.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <std_msgs/msg/float32.hpp>
+#include <std_msgs/msg/bool.hpp>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Matrix3x3.h>
-#include <cmath>
-#include <algorithm>
 
 using std::placeholders::_1;
+using namespace std::chrono_literals;
 
 class NavVelocityTracker : public rclcpp::Node {
 public:
@@ -38,12 +42,19 @@ public:
             "/cmd_vel_nav", rclcpp::SystemDefaultsQoS(),
             std::bind(&NavVelocityTracker::cmd_vel_callback, this, _1));
 
-        // set_flight_altitude_sub_ = this->create_subscription<std_msgs::msg::Float32>(
-        //     "/set_flight_altitude", rclcpp::SystemDefaultsQoS(),
-        //     std::bind(&NavVelocityTracker::set_altitude_callback, this, _1));
+        set_flight_altitude_sub_ = this->create_subscription<std_msgs::msg::Float32>(
+            "/set_flight_altitude", 1,
+            std::bind(&NavVelocityTracker::set_altitude_callback, this, _1));
+
+        set_altitude_done_pub_ = this->create_publisher<std_msgs::msg::Bool>("/set_flight_alt_done", 1);
 
         // 發布修正後的速度給飛控
         cmd_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
+
+        
+
+        controller_timer_ = this->create_wall_timer(
+            100ms, std::bind(&NavVelocityTracker::control_loop, this));
         
         RCLCPP_INFO(this->get_logger(), "C++ Velocity Tracker initialized.");
     }
@@ -54,18 +65,39 @@ private:
     double center_y_ = 0.0;
     const double angular_gain_ = 1.5;
     const double max_angular_vel_ = 0.5;
+    const double z_vel_kp = 0.5;
+    const double max_z_vel = 0.5;   // m/s
+    const double MAXIMUM_Z_TOLERANCE = 0.05;  // m
+    const double MINIMUM_Z_VEL = 0.05;     // m/s
     double yaw_align_threshold_;
+    double target_altitude_;
+    bool is_on_altitude_ = true;
 
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
     
     rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr center_sub_;
     rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_nav_sub_;
-    rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr set_flight_altitude_sub_;
+    rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr set_flight_altitude_sub_;
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr set_altitude_done_pub_;
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
-    // void set_altitude_callback(const std_msgs::msg::Float32::SharedPtr msg){
-    //     return;
-    // }
+    rclcpp::TimerBase::SharedPtr controller_timer_;
+
+    std::optional<geometry_msgs::msg::TransformStamped>
+    lookup_transform(const std::string & target, const std::string & source) {
+        try {
+            return tf_buffer_->lookupTransform(
+                target, source, tf2::TimePointZero, tf2::durationFromSec(0.05));
+        } catch (const tf2::TransformException &) {
+            return std::nullopt;
+        }
+    }
+
+    void set_altitude_callback(const std_msgs::msg::Float32::SharedPtr msg){
+        target_altitude_ = msg->data;
+        is_on_altitude_ = false;
+        return;
+    }
 
     void cmd_vel_callback(const geometry_msgs::msg::Twist::SharedPtr msg) {
         if (!tracking_active_) {
@@ -83,18 +115,20 @@ private:
         }
 
 
-        geometry_msgs::msg::TransformStamped transform;
-        try {
-            // C++ 的 TF 查詢速度比 Python 快上數十倍
-            transform = tf_buffer_->lookupTransform(
-                "map", "body", tf2::TimePointZero, tf2::durationFromSec(0.05));
-        } catch (const tf2::TransformException & ex) {
+        
+        auto transform = lookup_transform("map", "body");
+        if (!transform) {
             cmd_pub_->publish(*msg);
             return;
         }
 
-        double robot_x = transform.transform.translation.x;
-        double robot_y = transform.transform.translation.y;
+        double robot_x = transform->transform.translation.x;
+        double robot_y = transform->transform.translation.y;
+        double robot_z = transform->transform.translation.z;
+        // double qx = transform->transform.rotation.x;
+        // double qy = transform->transform.rotation.y;
+        double qz = transform->transform.rotation.z;
+        double qw = transform->transform.rotation.w;
         
         double dx = center_x_ - robot_x;
         double dy = center_y_ - robot_y;
@@ -104,12 +138,6 @@ private:
             cmd_pub_->publish(*msg);
             return;
         }
-
-        // 使用原本 Python 腳本中的複數運算邏輯 (避開 Euler gimbal lock)
-        double qx = transform.transform.rotation.x;
-        double qy = transform.transform.rotation.y;
-        double qz = transform.transform.rotation.z;
-        double qw = transform.transform.rotation.w;
 
         // Robot heading (r_cos, r_sin)
         double r_cos = qw * qw - qz * qz;
@@ -140,9 +168,46 @@ private:
         geometry_msgs::msg::Twist new_cmd;
         new_cmd.linear.x = e_cos * msg->linear.x + e_sin * msg->linear.y;
         new_cmd.linear.y = -e_sin * msg->linear.x + e_cos * msg->linear.y;
-        new_cmd.linear.z = msg->linear.z;
+
+        double z_pos_error = target_altitude_ - robot_z;
+        double z_vel = z_pos_error * z_vel_kp;
+        z_vel = std::clamp(z_vel, -max_z_vel, max_z_vel);
+
+        if (is_on_altitude_ && std::abs(z_pos_error) > MAXIMUM_Z_TOLERANCE) {
+            new_cmd.linear.z = z_vel;
+        } else {
+            new_cmd.linear.z = msg->linear.z;
+        }
+        
         new_cmd.angular.z = angular_z;
 
+        cmd_pub_->publish(new_cmd);
+    }
+
+    void control_loop() {
+        if (is_on_altitude_) {
+            return;
+        }
+
+        auto transform = lookup_transform("map", "body");
+        if (!transform) {
+            return;
+        }
+
+        double robot_z = transform->transform.translation.z;
+        double z_pos_error = target_altitude_ - robot_z;
+        if (std::abs(z_pos_error) < MAXIMUM_Z_TOLERANCE) {
+            is_on_altitude_ = true;
+            std_msgs::msg::Bool msg;
+            msg.data = true;
+            set_altitude_done_pub_->publish(msg);
+            return;
+        }
+        double z_vel = z_pos_error * z_vel_kp;
+        z_vel = std::clamp(z_vel, -max_z_vel, max_z_vel);
+        
+        geometry_msgs::msg::Twist new_cmd;
+        new_cmd.linear.z = z_vel;
         cmd_pub_->publish(new_cmd);
     }
 };

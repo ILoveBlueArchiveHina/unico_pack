@@ -78,9 +78,12 @@ private:
     std::vector<int> INNER_MARKER_IDS;
     const int MIN_MARKERS_REQUIRED = 3;
     const double DESCENT_SPEED = -0.1;
-    
-    const double Kp_xy = 0.3;
-    const double Kp_yaw = 0.015;
+
+    const double MAXIMUM_XY_SPEED = 0.3;
+    const double MAXIMUM_ANG_SPEED = 0.3;  // rad/s
+
+    const double Kp_xy = 0.5;
+    const double Kp_yaw = 0.3;
     
     const double ALIGNMENT_THRESHOLD_XY = 0.05;
     const double ALIGNMENT_THRESHOLD_YAW = 1.0;
@@ -372,10 +375,10 @@ private:
         }
         
         // 限制速度
-        vel_cmd.linear.x = std::clamp(vel_cmd.linear.x, -0.1, 0.1);
-        vel_cmd.linear.y = std::clamp(vel_cmd.linear.y, -0.1, 0.1);
-        vel_cmd.linear.z = std::clamp(vel_cmd.linear.z, -0.1, 0.1);
-        vel_cmd.angular.z = std::clamp(vel_cmd.angular.z, -0.1, 0.1);
+        vel_cmd.linear.x = std::clamp(vel_cmd.linear.x, -MAXIMUM_XY_SPEED, MAXIMUM_XY_SPEED);
+        vel_cmd.linear.y = std::clamp(vel_cmd.linear.y, -MAXIMUM_XY_SPEED, MAXIMUM_XY_SPEED);
+        vel_cmd.linear.z = std::clamp(vel_cmd.linear.z, -MAXIMUM_XY_SPEED, MAXIMUM_XY_SPEED);
+        vel_cmd.angular.z = std::clamp(vel_cmd.angular.z, -MAXIMUM_ANG_SPEED, MAXIMUM_ANG_SPEED);
         
         // 確保沒有 NaN
         if (!std::isfinite(vel_cmd.linear.x)) vel_cmd.linear.x = 0.0;
