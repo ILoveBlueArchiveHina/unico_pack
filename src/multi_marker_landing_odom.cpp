@@ -76,7 +76,7 @@ private:
     // 降落參數
     std::vector<int> MARKER_IDS;
     std::vector<int> INNER_MARKER_IDS;
-    const int MIN_MARKERS_REQUIRED = 3;
+    const int MIN_MARKERS_REQUIRED = 2;
     const double DESCENT_SPEED = -0.1;
 
     const double MAXIMUM_XY_SPEED = 0.3;
@@ -96,10 +96,16 @@ private:
     
     bool has_landing_center_ = false;
     CenterData landing_center_;
-    
+
+    // marker 在 odom (camera_init) frame 的記憶位置，偵測一次後永久有效
+    double marker_odom_x_ = 0.0, marker_odom_y_ = 0.0, marker_odom_yaw_ = 0.0;
+    bool has_marker_in_odom_ = false;
+
     int last_marker_count_ = 0;
     int last_inner_marker_count_ = 0;
     double current_altitude_ = 0.0;
+    geometry_msgs::msg::Pose current_odom_pose_;
+    bool has_odom_ = false;
     
     bool disarm_called_ = false;
     bool landing_complete_ = false;
@@ -207,9 +213,66 @@ private:
         return true;
     }
 
+    double get_yaw(const geometry_msgs::msg::Quaternion& q) {
+        tf2::Quaternion tf_q(q.x, q.y, q.z, q.w);
+        double r, p, y;
+        tf2::Matrix3x3(tf_q).getRPY(r, p, y);
+        return y;
+    }
+
+    // 偵測到 marker 時，把位置從 body frame 轉換並儲存到 camera_init frame
+    // yaw 轉為 odom frame 絕對角度，補償無人機後續旋轉
+    void store_marker_in_odom(const CenterData& center) {
+        if (!has_odom_) return;
+        double drone_yaw = get_yaw(current_odom_pose_.orientation);
+        marker_odom_x_ = current_odom_pose_.position.x
+                       + std::cos(drone_yaw) * center.x - std::sin(drone_yaw) * center.y;
+        marker_odom_y_ = current_odom_pose_.position.y
+                       + std::sin(drone_yaw) * center.x + std::cos(drone_yaw) * center.y;
+        // odom frame 絕對 heading（rad），之後用 drone 當前 yaw 相減得到相對誤差
+        marker_odom_yaw_ = drone_yaw + center.yaw * M_PI / 180.0;
+        has_marker_in_odom_ = true;
+        publish_odom_marker_tf();
+    }
+
+    // 從記憶的 odom 位置計算當前 body frame 下的誤差
+    bool get_center_from_odom(CenterData& center) {
+        if (!has_marker_in_odom_ || !has_odom_) return false;
+        double drone_yaw = get_yaw(current_odom_pose_.orientation);
+        double dx = marker_odom_x_ - current_odom_pose_.position.x;
+        double dy = marker_odom_y_ - current_odom_pose_.position.y;
+        center.x =  std::cos(drone_yaw) * dx + std::sin(drone_yaw) * dy;
+        center.y = -std::sin(drone_yaw) * dx + std::cos(drone_yaw) * dy;
+        // 轉回 degrees 給 check_alignment 和 Kp_yaw 使用
+        center.yaw = (marker_odom_yaw_ - drone_yaw) * 180.0 / M_PI;
+        return true;
+    }
+
+    // 廣播 camera_init → aruco_landing TF，供 RViz 視覺化
+    void publish_odom_marker_tf() {
+        geometry_msgs::msg::TransformStamped t;
+        t.header.stamp = this->now();
+        t.header.frame_id = "camera_init";
+        t.child_frame_id = "aruco_landing";
+        t.transform.translation.x = marker_odom_x_;
+        t.transform.translation.y = marker_odom_y_;
+        t.transform.translation.z = current_odom_pose_.position.z - landing_center_.z;
+        tf2::Quaternion q;
+        q.setRPY(0, 0, marker_odom_yaw_ * M_PI / 180.0);
+        t.transform.rotation.x = q.x();
+        t.transform.rotation.y = q.y();
+        t.transform.rotation.z = q.z();
+        t.transform.rotation.w = q.w();
+        tf_broadcaster_->sendTransform(t);
+    }
+
     void update_buffer_and_tf(const CenterData& center) {
         if (marker_buffer_.size() >= 10) marker_buffer_.pop_front();
         marker_buffer_.push_back(center);
+        CenterData smoothed;
+        if (get_smoothed_center(smoothed)) {
+            store_marker_in_odom(smoothed);
+        }
         publish_marker_transforms();
     }
 
@@ -334,58 +397,58 @@ private:
     }
 
     void control_loop() {
-        double dt_lost = (this->now() - last_valid_time_).seconds();
         geometry_msgs::msg::Twist vel_cmd;
-        
-        if (dt_lost > 1.0) {
+
+        // 尚未偵測到任何 marker：只緩慢下降等待
+        if (!has_marker_in_odom_) {
             if (!last_no_center_) {
-                RCLCPP_WARN(this->get_logger(), "🚨 標記訊號遺失 (%.2fs)！垂直降落", dt_lost);
+                RCLCPP_WARN(this->get_logger(), "尚未偵測到 marker，緩慢降落等待...");
                 last_no_center_ = true;
             }
             vel_cmd.linear.z = DESCENT_SPEED;
             vel_pub_->publish(vel_cmd);
-            marker_buffer_.clear();
             return;
         }
-        
+
+        // 一旦有記憶的 odom 位置，永遠用它計算誤差（不依賴相機更新率）
         CenterData center;
-        if (!get_smoothed_center(center)) {
-            if (!last_no_center_) {
-                RCLCPP_WARN(this->get_logger(), "No valid landing center, Slow landing...");
-                last_no_center_ = true;
-                vel_cmd.linear.z = DESCENT_SPEED;
-                vel_pub_->publish(vel_cmd);
-            }
+        if (!get_center_from_odom(center)) {
+            vel_cmd.linear.z = DESCENT_SPEED;
+            vel_pub_->publish(vel_cmd);
             return;
         }
         last_no_center_ = false;
-        
+
+        double dt_lost = (this->now() - last_valid_time_).seconds();
+        if (dt_lost > 1.0) {
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+                "相機偵測遺失 %.1fs，使用記憶的 odom 位置繼續控制", dt_lost);
+        }
+
         check_alignment(center);
         bool xy_aligned = std::sqrt(center.x * center.x + center.y * center.y) < ALIGNMENT_THRESHOLD_XY;
 
         if (aligned_done_) vel_cmd.linear.z = DESCENT_SPEED;
-        
+
         vel_cmd.linear.x = -Kp_xy * center.x;
         vel_cmd.linear.y = -Kp_xy * center.y;
-        
+
         if (xy_aligned) {
-            vel_cmd.angular.z = -Kp_yaw * center.yaw;
+            vel_cmd.angular.z = -Kp_yaw * (center.yaw * M_PI / 180.0);
         } else {
             vel_cmd.angular.z = 0.0;
         }
-        
-        // 限制速度
+
         vel_cmd.linear.x = std::clamp(vel_cmd.linear.x, -MAXIMUM_XY_SPEED, MAXIMUM_XY_SPEED);
         vel_cmd.linear.y = std::clamp(vel_cmd.linear.y, -MAXIMUM_XY_SPEED, MAXIMUM_XY_SPEED);
         vel_cmd.linear.z = std::clamp(vel_cmd.linear.z, -MAXIMUM_XY_SPEED, MAXIMUM_XY_SPEED);
         vel_cmd.angular.z = std::clamp(vel_cmd.angular.z, -MAXIMUM_ANG_SPEED, MAXIMUM_ANG_SPEED);
-        
-        // 確保沒有 NaN
+
         if (!std::isfinite(vel_cmd.linear.x)) vel_cmd.linear.x = 0.0;
         if (!std::isfinite(vel_cmd.linear.y)) vel_cmd.linear.y = 0.0;
         if (!std::isfinite(vel_cmd.linear.z)) vel_cmd.linear.z = 0.0;
         if (!std::isfinite(vel_cmd.angular.z)) vel_cmd.angular.z = 0.0;
-        
+
         vel_pub_->publish(vel_cmd);
     }
 
@@ -396,8 +459,7 @@ private:
             if (!disarm_called_) call_disarm();
         }
         if (landing_complete_) {
-            RCLCPP_INFO(this->get_logger(), "主程式檢測到降落完成，準備關閉");
-            rclcpp::shutdown();
+            RCLCPP_INFO(this->get_logger(), "主程式檢測到降落完成");
         }
     }
     
@@ -407,6 +469,8 @@ private:
     
     void altitude_callback(const nav_msgs::msg::Odometry::SharedPtr msg) {
         current_altitude_ = msg->pose.pose.position.z;
+        current_odom_pose_ = msg->pose.pose;
+        has_odom_ = true;
     }
 };
 
