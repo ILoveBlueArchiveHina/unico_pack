@@ -22,6 +22,7 @@ find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(campus_delivery_msgs REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
+find_package(rclcpp_action REQUIRED)
 
 add_executable(multi_marker_landing_node src/multi_marker_landing.cpp)
 ament_target_dependencies(multi_marker_landing_node 
@@ -38,6 +39,16 @@ ament_target_dependencies(multi_marker_landing_node
 
 add_executable(nav_velocity_tracker src/nav_velocity_tracker.cpp)
 ament_target_dependencies(nav_velocity_tracker
+  rclcpp 
+  nav2_msgs
+  geometry_msgs 
+  std_msgs 
+  tf2 
+  tf2_ros
+)
+
+add_executable(velocity_controller src/velocity_controller.cpp)
+ament_target_dependencies(velocity_controller
   rclcpp 
   nav2_msgs
   geometry_msgs 
@@ -64,6 +75,16 @@ ament_target_dependencies(rosbag_lifecycle
   rclcpp_lifecycle
 )
 
+add_executable(mission_dispatcher_v3 src/mission_dispatcher_v3.cpp)
+ament_target_dependencies(mission_dispatcher_v3
+  rclcpp
+  rclcpp_action
+  geometry_msgs
+  std_msgs
+  nav2_msgs
+  campus_delivery_msgs
+)
+
 add_executable(cmd_vel_bridge src/cmd_vel_bridge.cpp)
 ament_target_dependencies(cmd_vel_bridge
   rclcpp 
@@ -74,10 +95,12 @@ ament_target_dependencies(cmd_vel_bridge
 
 install(TARGETS
   multi_marker_landing_node
-  nav_velocity_tracker 
-  cmd_vel_bridge 
-  precision_landing_lifecycle 
-  fast_lio_lifecycle_wrapper 
+  nav_velocity_tracker
+  velocity_controller
+  mission_dispatcher_v3
+  cmd_vel_bridge
+  precision_landing_lifecycle
+  fast_lio_lifecycle_wrapper
   rosbag_lifecycle
   DESTINATION lib/${PROJECT_NAME}
 )
@@ -97,6 +120,7 @@ execute_process(
 install(
   PROGRAMS
   src/mission_dispatcher_v2.py
+  src/mission_dispatcher_v4.py
   src/manager.py
   src/main.py
   DESTINATION lib/${PROJECT_NAME}

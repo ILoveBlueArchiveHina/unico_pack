@@ -13,7 +13,7 @@ from campus_delivery_msgs.msg import NavTask, NavResult
 from geometry_msgs.msg import Pose2D
 from geographic_msgs.msg import GeoPointStamped
 from sensor_msgs.msg import BatteryState
-from std_msgs.msg import Header, Bool, Float32
+from std_msgs.msg import Header, Bool, Float64
 from nav2_msgs.action import NavigateToPose
 from action_msgs.msg import GoalStatus
 from rclpy.action import ActionClient
@@ -37,26 +37,27 @@ class ManagementNode(Node):
     def __init__(self):
         super().__init__('process_manager')
 
-        # launch parameters
-        self.declare_parameter("home_pose_x", 0.0)
-        self.declare_parameter("home_pose_y", 0.0)
+        # declare parameters (input values are for simulation; otherwise, default values will be used in actual test)
+        self.declare_parameter("home_pose_x", 2.0)
+        self.declare_parameter("home_pose_y", -2.05)
         self.declare_parameter("rosbag_folder_path", "/home/uni-co-jetson/rosbag")
         self.declare_parameter("mqtt_broker", "192.168.166.83")
-        self.declare_parameter("safe_zone_x", 15.0)
-        self.declare_parameter("safe_zone_y", -6.0)
-
+        self.declare_parameter("safe_zone_x", SAFE_ZONE_X)
+        self.declare_parameter("safe_zone_y", SAFE_ZONE_Y)
+        
         self.home_pose_x = self.get_parameter("home_pose_x").value
         self.home_pose_y = self.get_parameter("home_pose_y").value
         self.rosbag_folder_path = self.get_parameter("rosbag_folder_path").value
         self.mqtt_broker = self.get_parameter("mqtt_broker").value
         self.safe_zone_x = self.get_parameter("safe_zone_x").value
         self.safe_zone_y = self.get_parameter("safe_zone_y").value
+        self.use_sim_time = self.get_parameter("use_sim_time").value
 
         # ROS2 topics (publisher)
         self.task_publisher_ = self.create_publisher(NavTask, "navigation_tasks", 1)
         self.start_vel_bridge_signal_pub = self.create_publisher(Bool, 'start_vel_bridging', 1)
         self.cancel_current_task_pub = self.create_publisher(Bool, "cancel_navigation", 1)
-        self.set_flight_altitude_pub = self.create_publisher(Float32, "set_flight_altitude", 1)
+        self.set_flight_altitude_pub = self.create_publisher(Float64, "set_flight_altitude", 1)
         self._gp_origin_pub = self.create_publisher(
             GeoPointStamped, '/mavros/global_position/set_gp_origin', 1)  # Setting EKF origin
         
@@ -264,7 +265,7 @@ class ManagementNode(Node):
         self.is_returning_home = False
 
         if self._is_in_air():
-            self._execute_task(self.current_task)
+            self._fly_to_safe_zone(PROCESS_STATE_INSPECTION)
         else:
             self.get_logger().info("Drone on ground. Starting flight sequence before task.")
             self._flight_sequence()
@@ -488,38 +489,34 @@ class ManagementNode(Node):
                 return
 
             self.get_logger().info("Arrived at safe zone.")
-            if process_state == PROCESS_STATE_INSPECTION:
-                self._set_flight_altitude(INSPECTION_ALT)
-
-            elif process_state == PROCESS_STATE_RETURN_HOME:
-                self._set_flight_altitude(RETURN_HOME_ALT)
+            self._set_flight_altitude(process_state)
 
             return
 
-            # todo: 用進程狀態參數來決定飛到安全區後要回家還是巡檢
-
         future.add_done_callback(_fly_to_safe_zone_callback)
+
+    def _set_flight_altitude(self, process_state):
+        self.process_state = process_state
+        msg = Float64()
+        if process_state == PROCESS_STATE_INSPECTION:
+            self.get_logger().info(f'Set alt to {INSPECTION_ALT} m')
+            msg.data = INSPECTION_ALT
+
+        elif process_state == PROCESS_STATE_RETURN_HOME:
+            self.get_logger().info(f'Set alt to {RETURN_HOME_ALT} m')
+            msg.data = RETURN_HOME_ALT
+        
+        self.set_flight_altitude_pub.publish(msg)
 
     def set_flight_altitude_callback(self, msg):
         if msg.data:
-            if self.process_state == "INSPECTION":
+            if self.process_state == PROCESS_STATE_INSPECTION:
                 # todo: execute inspection process
                 self._execute_task(self.current_task)
                 return
 
-            elif self.process_state == "RETURN_HOME":
+            elif self.process_state == PROCESS_STATE_RETURN_HOME:
                 self.return_home()
-
-    def _set_flight_altitude(self, process_state):
-        self.process_state = process_state
-        msg = Float32()
-        if process_state == "RETURN_HOME":
-            msg.data = RETURN_HOME_ALT
-            
-        elif process_state == "INSPECTION":
-            msg.data = INSPECTION_ALT
-        
-        self.set_flight_altitude_pub.publish(msg)
 
     def return_home(self):
         if self.is_returning_home:
@@ -672,7 +669,11 @@ class ManagementNode(Node):
             return
 
         if action == "on":
+            
             output_path = f"{self.rosbag_folder_path}/{path}"
+            if self.use_sim_time:
+                self.get_logger().error(f'Starting recording ROS bag (simulation), Task: {self.current_task.task_id}, path:{output_path}')
+                return
             if not self._bag_set_params_cli.wait_for_service(timeout_sec=2.0):
                 self.get_logger().error("rosbag_node set_parameters service not available.")
                 return
@@ -687,6 +688,7 @@ class ManagementNode(Node):
                     self._bag_change_state_cli, Transition.TRANSITION_ACTIVATE, f"Rosbag({path})")
             )
         else:
+            self.get_logger().error(f'Stop recording ROS bag')
             self._lifecycle_transition(self._bag_change_state_cli, transition_id, f"Rosbag({path})")
 
     def threading_program(self, target_function, input):

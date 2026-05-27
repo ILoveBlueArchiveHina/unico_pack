@@ -18,6 +18,7 @@ def generate_launch_description():
     map_odom_tf_x = LaunchConfiguration('map_odom_tf_x')
     map_odom_tf_y = LaunchConfiguration('map_odom_tf_y')
     map_odom_tf_z = LaunchConfiguration('map_odom_tf_z')
+    map_odom_tf_yaw = LaunchConfiguration('map_odom_tf_yaw')
     
     declare_params = DeclareLaunchArgument(
         'params_file',
@@ -52,6 +53,11 @@ def generate_launch_description():
     declare_map_odom_tf_z = DeclareLaunchArgument(
         'map_odom_tf_z',
         default_value='2.05'
+    )
+
+    declare_map_odom_tf_yaw = DeclareLaunchArgument(
+        'map_odom_tf_yaw',
+        default_value='0.0'
     )
 
 
@@ -131,7 +137,7 @@ def generate_launch_description():
                 '--z', map_odom_tf_z,
                 '--roll', '0.0',
                 '--pitch', '0.0',
-                '--yaw', '0.0',
+                '--yaw', map_odom_tf_yaw,
                 '--frame-id', 'map',
                 '--child-frame-id', 'camera_init']
         ),
@@ -199,4 +205,5 @@ def generate_launch_description():
     return LaunchDescription([
         declare_params, declare_sim, declare_map, declare_user,
         declare_map_odom_tf_x, declare_map_odom_tf_y, declare_map_odom_tf_z,
+        declare_map_odom_tf_yaw,
     ] + nodes + [lifecycle_manager])

@@ -54,33 +54,34 @@ controller_server:
     FollowPath:
       plugin: "dwb_core::DWBLocalPlanner"
       debug_trajectory_details: False   # 關閉減少 log 量
-      min_vel_x: 0.0
-      min_vel_y: 0.0
+      min_vel_x: -0.8
+      min_vel_y: -0.8
       max_vel_x: 0.8
       max_vel_y: 0.8
       max_vel_theta: 0.0
-      min_speed_xy: 0.0
-      max_speed_xy: 0.8
+      min_speed_xy: -1.2
+      max_speed_xy: 1.2
       min_speed_theta: 0.0
-      acc_lim_x: 0.5                   # 降低：起步更平穩（原本 1.0）
-      acc_lim_y: 0.5
+      acc_lim_x: 2.5                   
+      acc_lim_y: 2.5
       acc_lim_theta: 0.0
-      decel_lim_x: -2.5                # 維持：煞車及時
+      decel_lim_x: -2.5                
       decel_lim_y: -2.5
       decel_lim_theta: 0.0
       vx_samples: 20
       vy_samples: 20
-      vtheta_samples: 1                # 修正：theta 恆為 0，只需 1 個樣本
-      sim_time: 2.0                    # 增加：更長預視距離，煞車更及時
+      vtheta_samples: 1                
+      sim_time: 1.7                    
       linear_granularity: 0.05
       angular_granularity: 0.025
       trans_stopped_velocity: 0.25
-      short_circuit_trajectory_evaluation: True
+      short_circuit_trajectory_evaluation: True  
       stateful: True
       critics: ["Oscillation", "BaseObstacle", "PathDist", "GoalDist"]
-      BaseObstacle.scale: 0.02
-      PathDist.scale: 48.0             # 提高：嚴格跟隨路徑，不抄近路（原本 32）
-      GoalDist.scale: 16.0             # 降低：避免直衝目標點（原本 24）
+      BaseObstacle.scale: 0.5
+      PathDist.scale: 32.0
+      GoalDist.scale: 24.0              
+      # Twirling.scale: 32.0
 
 local_costmap:
   local_costmap:
@@ -99,7 +100,7 @@ local_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 3.0
-        inflation_radius: 1.5
+        inflation_radius: 2.0
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: True
@@ -124,8 +125,8 @@ local_costmap:
 global_costmap:    # 全域代價地圖
   global_costmap:
     ros__parameters:
-      update_frequency: 0.5
-      publish_frequency: 0.5
+      update_frequency: 2.0
+      publish_frequency: 1.0
       global_frame: map
       robot_base_frame: body
       use_sim_time: False
@@ -138,7 +139,7 @@ global_costmap:    # 全域代價地圖
         enabled: True
         observation_sources: pointcloud
         footprint_clearing_enabled: true
-        max_obstacle_height: 2.0
+        max_obstacle_height: 4.0
         combination_method: 1
         pointcloud:
           topic: /cloud_registered_body
@@ -146,7 +147,7 @@ global_costmap:    # 全域代價地圖
           obstacle_min_range: 0.6
           raytrace_max_range: 8.5
           raytrace_min_range: 0.0
-          max_obstacle_height: 6.0
+          max_obstacle_height: 5.0
           min_obstacle_height: 0.2
           clearing: True
           marking: True
@@ -158,7 +159,7 @@ global_costmap:    # 全域代價地圖
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 3.0
-        inflation_radius: 1.5
+        inflation_radius: 2.0
       always_send_full_costmap: True
 
 map_server:
@@ -186,11 +187,11 @@ planner_server:
       tolerance: 0.125                      # tolerance for planning if unable to reach exact pose, in meters
       downsample_costmap: false             # whether or not to downsample the map
       downsampling_factor: 1                # multiplier for the resolution of the costmap layer (e.g. 2 on a 5cm costmap would be 10cm)
-      allow_unknown: true                   # allow traveling in unknown space
+      allow_unknown: false                  # allow traveling in unknown space
       max_iterations: 1000000               # maximum total iterations to search for before failing (in case unreachable), set to -1 to disable
       max_on_approach_iterations: 1000      # maximum number of iterations to attempt to reach goal once in tolerance
       max_planning_time: 5.0                # max time in s for planner to plan, smooth
-      cost_travel_multiplier: 2.0           # Cost multiplier to apply to search to steer away from high cost areas. Larger values will place in the center of aisles more exactly (if non-`FREE` cost potential field exists) but take slightly longer to compute. To optimize for speed, a value of 1.0 is reasonable. A reasonable tradeoff value is 2.0. A value of 0.0 effective disables steering away from obstacles and acts like a naive binary search A*.
+      cost_travel_multiplier: 3.0           # Cost multiplier to apply to search to steer away from high cost areas. Larger values will place in the center of aisles more exactly (if non-`FREE` cost potential field exists) but take slightly longer to compute. To optimize for speed, a value of 1.0 is reasonable. A reasonable tradeoff value is 2.0. A value of 0.0 effective disables steering away from obstacles and acts like a naive binary search A*.
       use_final_approach_orientation: false # Whether to set the final path pose at the goal's orientation to the requested orientation (false) or in line with the approach angle so the robot doesn't rotate to heading (true)
       smoother:
         max_iterations: 1000
@@ -223,7 +224,7 @@ waypoint_follower:
   ros__parameters:
     use_sim_time: False
     loop_rate: 10              # 20 -> 10
-    stop_on_failure: false
+    stop_on_failure: False
     waypoint_task_executor_plugin: "wait_at_waypoint"
     wait_at_waypoint:
       plugin: "nav2_waypoint_follower::WaitAtWaypoint"
@@ -233,14 +234,12 @@ waypoint_follower:
 velocity_smoother:
   ros__parameters:
     use_sim_time: False
-    smoothing_frequency: 10.0
-    scale_velocities: False
+    smoothing_frequency: 20.0
+    scale_velocities: false
     feedback: "OPEN_LOOP"
-    max_velocity: [1.0, 1.0, 1.0]
-    min_velocity: [-1.0, -1.0, -1.0]
-    max_accel: [1.0, 1.0, 1.0]
-    max_decel: [-1.0, -1.0, -1.0]
-    odom_topic: "Odometry"
-    odom_duration: 0.1
-    deadband_velocity: [0.05, 0.05, 0.05]
+    max_velocity: [0.8, 0.8, 0.0]
+    min_velocity: [-0.8, -0.8, 0.0]
+    max_accel: [1.0, 1.0, 0.0]
+    max_decel: [-2.5, -2.5, 0.0]
+    deadband_velocity: [0.05, 0.05, 0.0]  # 速度變化小於此值時不發出新指令，消除微抖動
     velocity_timeout: 1.0

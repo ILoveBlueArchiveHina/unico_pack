@@ -11,7 +11,9 @@ from action_msgs.msg import GoalStatus
 from campus_delivery_msgs.msg import NavTask, NavResult  # My custom messages
 from nav2_msgs.action import FollowWaypoints # Nav2 Actions
 from geometry_msgs.msg import PoseStamped, Point    # Nav2 target pose message type
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, Float64
+
+PI = 3.1416
 
 class Nav2Executor(Node):
 
@@ -43,6 +45,11 @@ class Nav2Executor(Node):
             1,
             callback_group=self.callback_group
         )
+
+        self.set_target_yaw_pub = self.create_publisher(
+            Float64,
+            'set_target_yaw',
+            1)
 
         self.result_pub = self.create_publisher(
             NavResult,
@@ -91,14 +98,6 @@ class Nav2Executor(Node):
         else:
             self.get_logger().warn(f'Refuse to execute a task with {len(msg.waypoints)} waypoints.')
 
-    def cancel_current_task_callback(self, msg):
-        if msg.data and self._current_goal_handle is not None:
-            self._is_task_cancelled = True
-            self._current_goal_handle.cancel_goal_async()
-            self._current_goal_handle = None
-            self.cargo_queue.clear()
-            self.expanded_points = []
-            self.finish_task(success=False)
 
     def handle_cargo_task(self, waypoints_data):
         """Handle 4-waypoint cargo inspection with loop expansion"""
@@ -158,10 +157,9 @@ class Nav2Executor(Node):
             self.finish_task(success=False)
             return
 
-        idx = self.current_start_index
-        x, y = self.expanded_points[idx]
+        x, y = self.expanded_points[self.current_start_index]
         self.get_logger().info(
-            f"Phase 1: Trying start point {idx+1}/{len(self.expanded_points)} ({x:.2f}, {y:.2f})...")
+            f"Phase 1: Trying start point {self.current_start_index+1}/{len(self.expanded_points)} ({x:.2f}, {y:.2f})...")
         self.start_approach(x, y)
 
     def start_approach(self, x, y):
@@ -200,7 +198,7 @@ class Nav2Executor(Node):
             result = future.result().result
             if len(result.missed_waypoints) == 0:
                 self.get_logger().info('Phase 1: Approach Complete. Starting Phase 2: Inspection Loop.')
-                # Rotate cargo_queue so inspection legs start from the successful point
+                self.set_target_yaw(self.current_start_index)
                 rotate_count = 0
                 self.current_start_index = 0
                 if rotate_count > 0 and self.cargo_queue:
@@ -209,7 +207,7 @@ class Nav2Executor(Node):
                 ros_msg = Bool()
                 ros_msg.data = True
                 self.ready_to_record_rosbag_pub.publish(ros_msg)
-                self.process_next_cargo_leg()
+                
             else:
                 self.get_logger().warn(
                     f'Phase 1: Approach failed for start point {self.current_start_index+1}/{len(self.expanded_points)}, trying next...')
@@ -218,9 +216,22 @@ class Nav2Executor(Node):
 
         future.add_done_callback(approach_response_callback)
 
-    
+    def set_target_yaw(self, current_point):
+        msg = Float64()
+        if current_point == 0:
+            msg.data = -PI/2
+        elif current_point == 1:
+            msg.data = -PI
+        elif current_point == 2:
+            msg.data = PI/2
+        elif current_point == 3 or current_point == 4:
+            msg.data = 0.0
+        self.set_target_yaw_pub.publish(msg)
+
     def set_yaw_done_callback(self, msg):
         if msg.data:
+            # Rotate cargo_queue so inspection legs start from the successful point
+            self.process_next_cargo_leg(failed_faces=self.failed_faces)
             return
 
     def create_pose(self, x, y):
@@ -285,11 +296,19 @@ class Nav2Executor(Node):
             if 0 in missed:
                 self.get_logger().warn(f"Face {self.current_leg_index} Endpoint unreachable.")
                 self.failed_faces.append(self.current_leg_index)  # store failed cargo face
-                
-            # Continue to next leg
-            self.process_next_cargo_leg(failed_faces=self.failed_faces)
+            
+            self.set_target_yaw(self.current_leg_index)
 
         future.add_done_callback(cargo_leg_response_callback)
+
+    def cancel_current_task_callback(self, msg):
+        if msg.data and self._current_goal_handle is not None:
+            self._is_task_cancelled = True
+            self._current_goal_handle.cancel_goal_async()
+            self._current_goal_handle = None
+            self.cargo_queue.clear()
+            self.expanded_points = []
+            self.finish_task(success=False)
 
     def finish_task(self, success, failed_faces=None):
         if failed_faces is None:
@@ -309,6 +328,8 @@ class Nav2Executor(Node):
              self.get_logger().info('Task Completed Successfully!')
              
         self.result_pub.publish(result_msg)
+
+    
 
 def main(args=None):
     rclpy.init(args=args)
