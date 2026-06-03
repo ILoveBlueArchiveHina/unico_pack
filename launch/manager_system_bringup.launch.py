@@ -24,7 +24,7 @@ def generate_launch_description():
         actions = [
             Node(
             package='unico_pack',
-            executable='mission_dispatcher_v2.py',
+            executable='mission_dispatcher_v4.py',
             output='screen',
             prefix=['taskset -c 1,2,3']
             )]
@@ -41,7 +41,7 @@ def generate_launch_description():
             ),
             Node(
                 package='unico_pack',
-                executable='nav_velocity_tracker',
+                executable='velocity_controller',
                 prefix=['taskset -c 1,2,3']
             )]
         ),
@@ -62,5 +62,7 @@ def generate_launch_description():
             package='unico_pack',
             executable='rosbag_lifecycle',
             prefix = ['taskset -c 1,2,3']
-        )
+        ),
+
+        
     ])
