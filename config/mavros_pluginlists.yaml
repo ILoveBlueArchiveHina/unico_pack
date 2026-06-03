@@ -1,0 +1,72 @@
+/**:
+  ros__parameters:
+    plugin_denylist:
+      # common
+      - actuator_control
+      - ftp
+      - hil
+      # extras
+      - altitude
+      - debug_value
+      - image_pub
+      - px4flow
+      - vibration
+      - vision_speed_estimate
+      - wheel_odometry
+
+      - adsb             # 除非你有裝噴射客機用的廣播式自動相關監視
+      - camera           # 除非你要透過 MAVROS 控制相機快門
+      - cam_imu_sync     # 相機與 IMU 同步，非必要
+      - distance_sensor  # 除非你有裝雷達/超音波避障
+      - landing_target   # 自動精準降落用
+      - log_transfer     # 遠端讀取飛控 log 用
+      - manual_control   # 除非你用 ROS 手把控制飛控
+      - mount            # 雲台控制
+      - obstacle_distance # 避障距離資料
+      - param            # 如果你不需要在運行時透過 ROS 修改飛控參數
+      - playroom         # 實驗室專用功能
+      - trajectory       # 除非你使用特定的軌跡規劃接口
+      - tunnel           # 數據隧道轉發
+
+      - cellular_status
+      - companion_process_status
+      - esc_status
+      - esc_telemetry
+      - fake_gps
+      - geofence
+      - gimbal_control
+      - global_position
+      - gps_input
+      - gps_rtk
+      - gps_status
+      - guided_target
+      - home_position
+      - mag_calibration_status
+      - mount_control
+      - nav_controller_output
+      - obstacle_distance_3d
+      - onboard_computer_status
+      - open_drone_id
+      - optical_flow
+      - play_tune
+      - rallypoint
+      - rangefinder
+      - rc_io
+      - setpoint_accel
+      - setpoint_attitude
+      - setpoint_position
+      - setpoint_trajectory
+      - setpoint_velocity
+      - sim_state
+      - tdr_radio
+      - terrain
+      - vfr_hud
+      - vision_speed
+      - waypoint
+      - wind_estimation
+      - odometry
+      - mocap_pose_estimate
+      - imu
+
+    # plugin_allowlist:
+      # - 'sys_**'

@@ -628,6 +628,8 @@ class ManagementNode(Node):
     def _lifecycle_transition(self, client, transition_id, label, done_cb=None):
         if not client.wait_for_service(timeout_sec=2.0):
             self.get_logger().error(f"{label} change_state service not available.")
+            if label == "PrecisionLanding":
+                self.force_landing()
             if done_cb:
                 done_cb(False)
             return

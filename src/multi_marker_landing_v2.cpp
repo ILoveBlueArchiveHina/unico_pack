@@ -77,6 +77,7 @@ private:
     std::vector<int> MARKER_IDS;
     std::vector<int> INNER_MARKER_IDS;
     const int MIN_MARKERS_REQUIRED = 3;
+    const double HALF_DISTANCE_BETWEEN_MARKERS = 0.25;  // m
     const double DESCENT_SPEED = -0.1;
 
     const double MAXIMUM_XY_SPEED = 0.3;
@@ -144,8 +145,8 @@ private:
                 
                 MarkerData md;
                 md.id = marker.id;
-                md.x = marker.pose.pose.position.x;
-                md.y = marker.pose.pose.position.y;
+                md.x = marker.pose.pose.position.y;
+                md.y = marker.pose.pose.position.x;
                 md.z = marker.pose.pose.position.z;
                 md.qx = q.x(); md.qy = q.y(); md.qz = q.z(); md.qw = q.w();
                 md.roll = roll * 180.0 / M_PI;
@@ -157,19 +158,29 @@ private:
             }
         }
         
-        bool has_outer = detected_markers_.size() >= (size_t)MIN_MARKERS_REQUIRED;
+        bool has_outer = detected_markers_.size() > 0;
+        bool has_more_outer = detected_markers_.size() >= (size_t)MIN_MARKERS_REQUIRED;
         bool has_inner = detected_inner_markers_.size() > 0;
         
         if (has_outer) {
-            has_landing_center_ = calculate_center(detected_markers_, landing_center_);
-            if (has_landing_center_) {
-                update_buffer_and_tf(landing_center_);
-                if (detected_markers_.size() != (size_t)last_marker_count_) {
-                    RCLCPP_INFO(this->get_logger(), "Detected %zu outer markers, using outer center", detected_markers_.size());
-                    last_marker_count_ = detected_markers_.size();
+            if (has_more_outer){
+                has_landing_center_ = calculate_center(detected_markers_, landing_center_);
+                if (has_landing_center_) {
+                    update_buffer_and_tf(landing_center_);
+                    if (detected_markers_.size() != (size_t)last_marker_count_) {
+                        RCLCPP_INFO(this->get_logger(), "Detected %zu outer markers, using outer center", detected_markers_.size());
+                        last_marker_count_ = detected_markers_.size();
+                    }
+                    last_valid_time_ = this->now();
                 }
-                last_valid_time_ = this->now();
+            } else {
+                has_landing_center_ = less_marker_estimate(detected_markers_, landing_center_);
+                if (has_landing_center_) {
+                    update_buffer_and_tf(landing_center_);
+                    last_valid_time_ = this->now();
+                }
             }
+            
         } else if (has_inner) {
             has_landing_center_ = calculate_center(detected_inner_markers_, landing_center_);
             if (has_landing_center_) {
@@ -204,6 +215,50 @@ private:
         center.z = sum_z / n;
         center.yaw = sum_yaw / n;
         center.num_markers = n;
+        return true;
+    }
+
+    // Estimate center from 1–2 outer markers using known fixed offsets (yaw=0).
+    // Layout (drone view looking down):
+    //   10(top-left)  20(top-right)
+    //   30(bot-left)  40(bot-right)
+    // MarkerData.x = ROS pose.y (lateral, left +), MarkerData.y = ROS pose.x (forward +)
+    bool less_marker_estimate(const std::map<int, MarkerData>& markers, CenterData& center) {
+        if (markers.empty()) return false;
+
+        const double H = HALF_DISTANCE_BETWEEN_MARKERS;
+        // offset from center to each marker: center = marker - offset
+        const std::map<int, std::pair<double, double>> offsets = {
+            {10, {-H, -H}},   // top-left:    left(-x), forward(+y)
+            {20, {-H,  H}},   // top-right:   right(-x), forward(+y)
+            {30, { H, -H}},   // bottom-left: left(+x), backward(-y)
+            {40, { H,  H}},   // bottom-right: right(-x), backward(-y)
+        };
+
+        double sum_cx = 0, sum_cy = 0, sum_cz = 0, sum_yaw = 0;
+        int count = 0;
+
+        for (const auto& pair : markers) {
+            auto it = offsets.find(pair.first);
+            if (it == offsets.end()) continue;
+            const auto& m = pair.second;
+            sum_cx  += m.x - it->second.first;
+            sum_cy  += m.y - it->second.second;
+            sum_cz  += m.z;
+            sum_yaw += m.yaw;
+            count++;
+        }
+
+        if (count == 0) return false;
+
+        center.x = sum_cx / count;
+        center.y = sum_cy / count;
+        center.z = sum_cz / count;
+        center.yaw = sum_yaw / count;
+        center.num_markers = count;
+
+        RCLCPP_INFO(this->get_logger(), "less_marker_estimate: %d marker(s), est_center=(%.3f, %.3f, %.3f)",
+                    count, center.x, center.y, center.z);
         return true;
     }
 
@@ -365,8 +420,8 @@ private:
 
         if (aligned_done_) vel_cmd.linear.z = DESCENT_SPEED;
         
-        vel_cmd.linear.x = -Kp_xy * center.y;
-        vel_cmd.linear.y = -Kp_xy * center.x;
+        vel_cmd.linear.x = -Kp_xy * center.x;
+        vel_cmd.linear.y = -Kp_xy * center.y;
         
         if (xy_aligned) {
             vel_cmd.angular.z = -Kp_yaw * (center.yaw * M_PI / 180.0);

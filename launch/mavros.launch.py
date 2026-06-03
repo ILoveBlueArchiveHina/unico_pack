@@ -1,0 +1,50 @@
+import os
+from ament_index_python.packages import get_package_share_directory
+from launch import LaunchDescription
+from launch.actions import IncludeLaunchDescription, ExecuteProcess, TimerAction
+from launch.launch_description_sources import AnyLaunchDescriptionSource
+
+def generate_launch_description():
+    unico_pack_path = get_package_share_directory('unico_pack')  # 自己的ros2 套件包位置(share 路徑)
+    mavros_pkg_path = get_package_share_directory('mavros')
+
+    pluginlists_yaml = os.path.join(unico_pack_path, 'config', 'mavros_pluginlists.yaml')
+    config_yaml = os.path.join(unico_pack_path, 'config', 'apm_config.yaml')
+
+
+    mavros_node_launch = IncludeLaunchDescription(
+        AnyLaunchDescriptionSource(os.path.join(mavros_pkg_path, 'launch', 'node.launch')),
+        launch_arguments={
+            'pluginlists_yaml': pluginlists_yaml,
+            'config_yaml': config_yaml,
+            'fcu_url': 'udp://:14550@',
+            'gcs_url': 'udp://:14555@',
+            'tgt_system': '1',
+            'tgt_component': '1',
+            'fcu_protocol': 'v2.0',
+            'respawn_mavros': 'false',
+            'namespace': 'mavros'
+        }.items()
+    )
+
+    request_extended_state = TimerAction(
+        period=8.0,
+        actions=[
+            ExecuteProcess(
+                cmd=[
+                    'ros2', 'service', 'call', 
+                    '/mavros/set_message_interval', 
+                    'mavros_msgs/srv/MessageInterval', 
+                    '"{message_id: 245, message_rate: 1.0}"'
+                ],
+                shell=True,
+                output='screen'
+            )
+        ]
+    )
+
+
+    return LaunchDescription([
+        mavros_node_launch,
+        request_extended_state
+    ])

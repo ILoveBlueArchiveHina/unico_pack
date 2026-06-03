@@ -94,7 +94,7 @@ private:
     }
 
     double orientation_controller(const double & target, const double & current) {
-        double error = target - current;
+        double error = std::atan2(std::sin(target - current), std::cos(target - current));
         if (std::abs(error) < yaw_tolerance_) {
             return 0.0;
         }
