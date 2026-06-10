@@ -38,7 +38,7 @@ class FastLioVisionBridge(Node):
             depth=10
         )
 
-        # 訂閱 ZED Odometry
+        # 訂閱 Odometry
         self.sub = self.create_subscription(
             Odometry,
             fastlio_topic,

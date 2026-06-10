@@ -35,7 +35,6 @@
       - fake_gps
       - geofence
       - gimbal_control
-      - global_position
       - gps_input
       - gps_rtk
       - gps_status

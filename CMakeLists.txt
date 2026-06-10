@@ -24,7 +24,7 @@ find_package(campus_delivery_msgs REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(rclcpp_action REQUIRED)
 
-add_executable(multi_marker_landing_node src/multi_marker_landing.cpp)
+add_executable(multi_marker_landing_node src/multi_marker_landing_v2.cpp)
 ament_target_dependencies(multi_marker_landing_node 
   rclcpp 
   geometry_msgs 
@@ -87,10 +87,17 @@ ament_target_dependencies(mission_dispatcher_v3
 
 add_executable(cmd_vel_bridge src/cmd_vel_bridge.cpp)
 ament_target_dependencies(cmd_vel_bridge
-  rclcpp 
-  geometry_msgs 
-  mavros_msgs 
+  rclcpp
+  geometry_msgs
+  mavros_msgs
   std_msgs
+)
+
+add_executable(fastlio_to_mavros_only_pose src/fastlio_to_mavros_only_pose.cpp)
+ament_target_dependencies(fastlio_to_mavros_only_pose
+  rclcpp
+  nav_msgs
+  geometry_msgs
 )
 
 install(TARGETS
@@ -102,6 +109,7 @@ install(TARGETS
   precision_landing_lifecycle
   fast_lio_lifecycle_wrapper
   rosbag_lifecycle
+  fastlio_to_mavros_only_pose
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -113,7 +121,6 @@ install (
 execute_process(
   COMMAND chmod +x
     ${CMAKE_CURRENT_SOURCE_DIR}/src/mission_dispatcher_v2.py
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/manager.py
     ${CMAKE_CURRENT_SOURCE_DIR}/src/main.py
 )
 
@@ -121,7 +128,6 @@ install(
   PROGRAMS
   src/mission_dispatcher_v2.py
   src/mission_dispatcher_v4.py
-  src/manager.py
   src/main.py
   DESTINATION lib/${PROJECT_NAME}
 )

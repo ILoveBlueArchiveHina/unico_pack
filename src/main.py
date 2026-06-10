@@ -86,7 +86,7 @@ class ManagementNode(Node):
 
         # Timer
         self.create_timer(5.0, self._status_report)
-        self.set_ready_timer_ = self.create_timer(3.0, self._set_ready)
+        self.set_ready_timer_ = self.create_timer(5.0, self._set_ready)
 
         # Intialize variables
         self.task_queue = []
@@ -374,7 +374,7 @@ class ManagementNode(Node):
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.position.latitude  = 22.6
         msg.position.longitude = 120.288
-        msg.position.altitude  = 10.0
+        msg.position.altitude  = 0.0
         self._gp_origin_pub.publish(msg)
         self.get_logger().info("EKF global origin set.")
 
