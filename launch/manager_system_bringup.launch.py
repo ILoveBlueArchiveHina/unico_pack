@@ -14,7 +14,7 @@ def generate_launch_description():
                 'home_pose_x': 2.0,
                 'home_pose_y': -2.05,
                 'rosbag_folder_path': '/home/uni-co-jetson/rosbag',
-                'mqtt_broker': '192.168.166.83'
+                'mqtt_broker': 'broker.emqx.io'
             }],
             prefix=['taskset -c 1,2,3']
         ),

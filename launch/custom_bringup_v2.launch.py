@@ -62,27 +62,37 @@ def generate_launch_description():
 
 
     nodes = [
-        Node(
-            package='nav2_planner',
-            executable='planner_server',
-            name='planner_server',
-            output='screen',
-            parameters=[params_file, {'use_sim_time': use_sim_time}],
-            prefix=['taskset -c 1,2,3'],
+        TimerAction(
+            period=0.0,
+            actions=[
+                Node(
+                package='nav2_planner',
+                executable='planner_server',
+                name='planner_server',
+                output='screen',
+                parameters=[params_file, {'use_sim_time': use_sim_time}],
+                prefix=['taskset -c 1,2,3'],
+                ),
+            ]
         ),
-
-        Node(
-            package='nav2_controller',
-            executable='controller_server',
-            name='controller_server',
-            output='screen',
-            parameters=[params_file, {'use_sim_time': use_sim_time}],
-            remappings=[
-                ('cmd_vel', 'cmd_vel_nav'),
-            ],
-            prefix=['taskset -c 1,2,3'],
-        ),
-
+        
+        TimerAction(
+            period=2.0,
+            actions=[
+                Node(
+                    package='nav2_controller',
+                    executable='controller_server',
+                    name='controller_server',
+                    output='screen',
+                    parameters=[params_file, {'use_sim_time': use_sim_time}],
+                    remappings=[
+                        ('cmd_vel', 'cmd_vel_nav'),
+                    ],
+                    prefix=['taskset -c 1,2,3'],
+                ),]),
+        TimerAction(
+            period=4.0,
+            actions=[
         Node(
             package='nav2_behaviors',
             executable='behavior_server',
@@ -90,8 +100,11 @@ def generate_launch_description():
             output='screen',
             parameters=[params_file, {'use_sim_time': use_sim_time}],
             prefix=['taskset -c 1,2,3'],
-        ),
+        ),]),
 
+        TimerAction(
+            period=6.0,
+            actions=[
         Node(
             package='nav2_waypoint_follower',
             executable='waypoint_follower',
@@ -99,8 +112,10 @@ def generate_launch_description():
             output='screen',
             parameters=[params_file, {'use_sim_time': use_sim_time}],
             prefix=['taskset -c 1,2,3'],
-        ),
-
+        ),]),
+        TimerAction(
+            period=8.0,
+            actions=[
         Node(
             package='nav2_bt_navigator',
             executable='bt_navigator',
@@ -112,8 +127,11 @@ def generate_launch_description():
                 'default_nav_through_poses_bt_xml': os.path.join(unico_pack_path, 'config', 'drone_nav_through_poses.xml'),
                 }],
             prefix=['taskset -c 1,2,3'],
-            ),
+            ),]),
 
+        TimerAction(
+            period=10.0,
+            actions=[
         Node(
             package='nav2_map_server',
             executable='map_server',
@@ -124,7 +142,7 @@ def generate_launch_description():
                 'yaml_filename': map_file,
             }],
             prefix=['taskset -c 1,2,3'],
-        ),
+        ),]),
 
         Node(
             package='tf2_ros',
@@ -176,7 +194,7 @@ def generate_launch_description():
     ]
 
     lifecycle_manager = TimerAction(
-        period=5.0,
+        period=12.0,
         actions=[
             Node(
                 package='nav2_lifecycle_manager',

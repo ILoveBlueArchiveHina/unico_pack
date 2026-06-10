@@ -385,9 +385,6 @@ class ManagementNode(Node):
     def _execute_task(self, task):
         """Publish task to mission_dispatcher."""
         self.task_publisher_.publish(task)
-        bridge_signal_ = Bool()
-        bridge_signal_.data = True
-        self.start_vel_bridge_signal_pub.publish(bridge_signal_)
         self.get_logger().info(
             f"Executing Task {task.task_id} (Remaining in queue: {len(self.task_queue)})")
         self.send_feedback(task_id=task.task_id, result=0, failed_faces=[])
@@ -460,6 +457,9 @@ class ManagementNode(Node):
     # todo: 用進程狀態參數來決定飛到安全區後要回家還是巡檢
     def _fly_to_safe_zone(self, process_state):
         self.process_state = process_state
+        bridge_signal_ = Bool()
+        bridge_signal_.data = True
+        self.start_vel_bridge_signal_pub.publish(bridge_signal_)
         goal_msg = NavigateToPose.Goal()
         goal_msg.pose.header.frame_id = 'map'
         goal_msg.pose.header.stamp = self.get_clock().now().to_msg()
