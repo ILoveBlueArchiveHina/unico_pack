@@ -22,7 +22,7 @@ def generate_launch_description():
                 ('image_raw', 'landing_cam/image_raw'),
                 ('camera_info', 'landing_cam/camera_info')
             ],
-            prefix=['nice -n 10 '],
+            prefix=['taskset -c 1,2,3'],
         ),
         
         # ArUco多標記識別節點
@@ -41,14 +41,14 @@ def generate_launch_description():
                         ('camera_info', 'landing_cam/camera_info'),
                         ('image', 'landing_cam/image_raw')
                     ],
-                    prefix=['nice -n 10 '],
+                    prefix=['taskset -c 1,2,3'],
                 ),
 
                 # 多標記降落控制節點
                 Node(
                     package='unico_pack',
                     executable='multi_marker_landing_node',
-                    prefix=['nice -n 10 '],
+                    prefix=['taskset -c 1,2,3'],
                 ),
             ]
         ),

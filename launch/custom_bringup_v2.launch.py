@@ -62,88 +62,6 @@ def generate_launch_description():
 
 
     nodes = [
-        TimerAction(
-            period=0.0,
-            actions=[
-                Node(
-                package='nav2_planner',
-                executable='planner_server',
-                name='planner_server',
-                output='screen',
-                parameters=[params_file, {'use_sim_time': use_sim_time}],
-                prefix=['taskset -c 1,2,3'],
-                ),
-            ]
-        ),
-        
-        TimerAction(
-            period=2.0,
-            actions=[
-                Node(
-                    package='nav2_controller',
-                    executable='controller_server',
-                    name='controller_server',
-                    output='screen',
-                    parameters=[params_file, {'use_sim_time': use_sim_time}],
-                    remappings=[
-                        ('cmd_vel', 'cmd_vel_nav'),
-                    ],
-                    prefix=['taskset -c 1,2,3'],
-                ),]),
-        TimerAction(
-            period=4.0,
-            actions=[
-        Node(
-            package='nav2_behaviors',
-            executable='behavior_server',
-            name='behavior_server',
-            output='screen',
-            parameters=[params_file, {'use_sim_time': use_sim_time}],
-            prefix=['taskset -c 1,2,3'],
-        ),]),
-
-        TimerAction(
-            period=6.0,
-            actions=[
-        Node(
-            package='nav2_waypoint_follower',
-            executable='waypoint_follower',
-            name='waypoint_follower',
-            output='screen',
-            parameters=[params_file, {'use_sim_time': use_sim_time}],
-            prefix=['taskset -c 1,2,3'],
-        ),]),
-        TimerAction(
-            period=8.0,
-            actions=[
-        Node(
-            package='nav2_bt_navigator',
-            executable='bt_navigator',
-            name='bt_navigator',
-            output='screen',
-            parameters=[params_file, {
-                'use_sim_time': use_sim_time,
-                'default_nav_to_pose_bt_xml': default_xml_file,
-                'default_nav_through_poses_bt_xml': os.path.join(unico_pack_path, 'config', 'drone_nav_through_poses.xml'),
-                }],
-            prefix=['taskset -c 1,2,3'],
-            ),]),
-
-        TimerAction(
-            period=10.0,
-            actions=[
-        Node(
-            package='nav2_map_server',
-            executable='map_server',
-            name='map_server',
-            output='screen',
-            parameters=[{
-                'use_sim_time': use_sim_time,
-                'yaml_filename': map_file,
-            }],
-            prefix=['taskset -c 1,2,3'],
-        ),]),
-
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',
@@ -176,25 +94,107 @@ def generate_launch_description():
                 '--child-frame-id', 'zed_camera_link']
         ),
 
-    # TimerAction(
-    #     period = 18.0,
-    #     actions = [
-    #         Node(
-    #             package='nav2_velocity_smoother',
-    #             executable='velocity_smoother',
-    #             name='velocity_smoother',
-    #             output='screen',
-    #             parameters=[params_file, {'use_sim_time': use_sim_time}],
-    #             remappings=[(
-    #                 'cmd_vel', 'cmd_vel_raw'),
-    #             ],
-    #             prefix=['taskset -c 1,2'],
-    #         )]
-    # )
+        TimerAction(
+            period=0.0,
+            actions=[
+                Node(
+                    package='nav2_planner',
+                    executable='planner_server',
+                    name='planner_server',
+                    output='screen',
+                    parameters=[params_file, {'use_sim_time': use_sim_time}],
+                    prefix=['taskset -c 1,2,3'],
+                ),
+            ]
+        ),
+        
+        TimerAction(
+            period=2.0,
+            actions=[
+                Node(
+                    package='nav2_controller',
+                    executable='controller_server',
+                    name='controller_server',
+                    output='screen',
+                    parameters=[params_file, {'use_sim_time': use_sim_time}],
+                    remappings=[
+                        ('cmd_vel', 'cmd_vel_nav'),
+                    ],
+                    prefix=['taskset -c 1,2,3'],
+                ),]),
+        TimerAction(
+            period=4.0,
+            actions=[
+                Node(
+                    package='nav2_behaviors',
+                    executable='behavior_server',
+                    name='behavior_server',
+                    output='screen',
+                    parameters=[params_file, {'use_sim_time': use_sim_time}],
+                    prefix=['taskset -c 1,2,3'],
+        ),]),
+
+        TimerAction(
+            period=6.0,
+            actions=[
+                Node(
+                    package='nav2_waypoint_follower',
+                    executable='waypoint_follower',
+                    name='waypoint_follower',
+                    output='screen',
+                    parameters=[params_file, {'use_sim_time': use_sim_time}],
+                    prefix=['taskset -c 1,2,3'],
+        ),]),
+        TimerAction(
+            period=8.0,
+            actions=[
+                Node(
+                    package='nav2_bt_navigator',
+                    executable='bt_navigator',
+                    name='bt_navigator',
+                    output='screen',
+                    parameters=[params_file, {
+                        'use_sim_time': use_sim_time,
+                        'default_nav_to_pose_bt_xml': default_xml_file,
+                        'default_nav_through_poses_bt_xml': os.path.join(unico_pack_path, 'config', 'drone_nav_through_poses.xml'),
+                        }],
+            prefix=['taskset -c 1,2,3'],
+            ),]),
+
+        TimerAction(
+            period=10.0,
+            actions=[
+                Node(
+                    package='nav2_map_server',
+                    executable='map_server',
+                    name='map_server',
+                    output='screen',
+                    parameters=[{
+                        'use_sim_time': use_sim_time,
+                        'yaml_filename': map_file,
+                    }],
+            prefix=['taskset -c 1,2,3'],
+        ),]),
+
+        TimerAction(
+            period = 12.0,
+            actions = [
+                Node(
+                    package='nav2_velocity_smoother',
+                    executable='velocity_smoother',
+                    name='velocity_smoother',
+                    output='screen',
+                    parameters=[params_file, {'use_sim_time': use_sim_time}],
+                    remappings=[(
+                        'cmd_vel', 'cmd_vel_smoothed'),
+                    ],
+                    prefix=['taskset -c 1,2,3'],
+                )]
+        )
     ]
 
     lifecycle_manager = TimerAction(
-        period=12.0,
+        period=14.0,
         actions=[
             Node(
                 package='nav2_lifecycle_manager',
@@ -211,7 +211,7 @@ def generate_launch_description():
                         'behavior_server',
                         'waypoint_follower',
                         'bt_navigator',
-                        # 'velocity_smoother'
+                        'velocity_smoother'
                     ]
                 }],
                 prefix=['taskset -c 1,2,3'],

@@ -1,8 +1,8 @@
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, ExecuteProcess, TimerAction
-from launch.launch_description_sources import AnyLaunchDescriptionSource
+from launch.actions import ExecuteProcess, TimerAction
+from launch_ros.actions import Node
 
 def generate_launch_description():
     unico_pack_path = get_package_share_directory('unico_pack')  # 自己的ros2 套件包位置(share 路徑)
@@ -12,21 +12,22 @@ def generate_launch_description():
     config_yaml = os.path.join(unico_pack_path, 'config', 'apm_config.yaml')
 
 
-    mavros_node_launch = IncludeLaunchDescription(
-        AnyLaunchDescriptionSource(os.path.join(mavros_pkg_path, 'launch', 'node.launch')),
-        launch_arguments={
-            'pluginlists_yaml': pluginlists_yaml,
-            'config_yaml': config_yaml,
-            'fcu_url': 'udp://:14550@',
-            'gcs_url': 'udp://:14555@',
-            'tgt_system': '1',
-            'tgt_component': '1',
-            'fcu_protocol': 'v2.0',
-            'respawn_mavros': 'false',
-            'namespace': 'mavros'
-        }.items()
+    mavros_node_launch = Node(
+        package='mavros',
+        executable='mavros_node',
+        namespace='mavros',
+        output='screen',
+        prefix='taskset -c 4,5',
+        parameters=[
+            {'fcu_url': 'udp://:14550@'},
+            {'gcs_url': 'udp://:14555@'},
+            {'tgt_system': 1},
+            {'tgt_component': 1},
+            {'fcu_protocol': 'v2.0'},
+            pluginlists_yaml,
+            config_yaml,
+        ]
     )
-
     request_extended_state = TimerAction(
         period=8.0,
         actions=[

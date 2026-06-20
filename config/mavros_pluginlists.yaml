@@ -13,7 +13,6 @@
       - vibration
       - vision_speed_estimate
       - wheel_odometry
-
       - adsb             # 除非你有裝噴射客機用的廣播式自動相關監視
       - camera           # 除非你要透過 MAVROS 控制相機快門
       - cam_imu_sync     # 相機與 IMU 同步，非必要
@@ -27,7 +26,6 @@
       - playroom         # 實驗室專用功能
       - trajectory       # 除非你使用特定的軌跡規劃接口
       - tunnel           # 數據隧道轉發
-
       - cellular_status
       - companion_process_status
       - esc_status

@@ -182,7 +182,7 @@ private:
             // 發送 SIGINT 給整個 Process Group
             kill(-child_pid_, SIGINT); 
             
-            // 給予最多 3 秒的時間優雅關閉
+            // 給予最多 3 秒的時間關閉
             int status;
             int wait_count = 0;
             pid_t wpid = 0;
@@ -196,7 +196,7 @@ private:
                 wait_count++;
             }
 
-            // 如果 3 秒後還是沒死，強制拔管 (SIGKILL)
+            // 如果 3 秒後還是沒死，強制關閉 (SIGKILL)
             if (wpid == 0) {
                 RCLCPP_WARN(get_logger(), "Fast-LIO taking too long. Forcing SIGKILL...");
                 kill(-child_pid_, SIGKILL);
