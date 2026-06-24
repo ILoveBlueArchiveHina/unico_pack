@@ -72,14 +72,14 @@ class Nav2Executor(Node):
         self._action_client = ActionClient(self, FollowWaypoints, 'follow_waypoints', callback_group=self.callback_group)
         
         # Tracking State
-        self.tracking_active = False
+        self.tracking_mode = True
         self.center_x = 0.0
         self.center_y = 0.0
         self.angular_gain = 1.5
 
         self.get_logger().info("Nav2 Executor Node Started. Waiting for tasks...")
 
-        self.task_id = 0
+        self.task_id = ''
         self.cargo_queue = [] # Queue for sequential cargo legs
         self.current_leg_index = 0 # Track which leg we are on (1-4)
         self.failed_faces = [] # Store which faces failed sampling
@@ -105,11 +105,10 @@ class Nav2Executor(Node):
         ys = [wp.y for wp in waypoints_data]
         self.center_x = sum(xs) / 4.0
         self.center_y = sum(ys) / 4.0
-        self.tracking_active = True
         tracking_center = Point()
         tracking_center.x = self.center_x
         tracking_center.y = self.center_y
-        tracking_center.z = 1.0
+        tracking_center.z = 1.0         # Signal for start tracking
         self.get_logger().info(f"Cargo Task Detected! Deep Inspection Mode. Center: ({self.center_x:.2f}, {self.center_y:.2f})")
         self.tracking_active_pub.publish(tracking_center)
         
@@ -198,7 +197,11 @@ class Nav2Executor(Node):
             result = future.result().result
             if len(result.missed_waypoints) == 0:
                 self.get_logger().info('Phase 1: Approach Complete. Starting Phase 2: Inspection Loop.')
-                self.set_target_yaw(self.current_start_index)
+                if self.tracking_mode:
+                    self.process_next_cargo_leg(failed_faces=self.failed_faces)
+                else:
+                    self.set_target_yaw(self.current_leg_index)
+
                 rotate_count = 0
                 self.current_start_index = 0
                 if rotate_count > 0 and self.cargo_queue:
@@ -297,7 +300,10 @@ class Nav2Executor(Node):
                 self.get_logger().warn(f"Face {self.current_leg_index} Endpoint unreachable.")
                 self.failed_faces.append(self.current_leg_index)  # store failed cargo face
             
-            self.set_target_yaw(self.current_leg_index)
+            if self.tracking_mode:
+                self.process_next_cargo_leg(failed_faces=self.failed_faces)
+            else:
+                self.set_target_yaw(self.current_leg_index)
 
         future.add_done_callback(cargo_leg_response_callback)
 
@@ -313,7 +319,6 @@ class Nav2Executor(Node):
     def finish_task(self, success, failed_faces=None):
         if failed_faces is None:
             failed_faces = []
-        self.tracking_active = False
         result_msg = NavResult()
         result_msg.task_id = self.task_id
         result_msg.failed_faces = failed_faces

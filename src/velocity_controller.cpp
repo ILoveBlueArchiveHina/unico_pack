@@ -18,7 +18,7 @@ using namespace std::chrono_literals;
 
 class NavVelocityTracker : public rclcpp::Node {
 public:
-    NavVelocityTracker() : Node("nav_velocity_tracker"), tracking_active_(false) {
+    NavVelocityTracker() : Node("velocity_controller"), tracking_active_(false) {
 
         // TF Listener 設定
         tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
@@ -45,6 +45,16 @@ public:
 
             });
 
+        tracking_center_sub_ = this->create_subscription<geometry_msgs::msg::Point>(
+            "/tracking_center", 10,
+            [this](const geometry_msgs::msg::Point::SharedPtr msg) {
+                center_x_ = msg->x;
+                center_y_ = msg->y;
+                tracking_active_ = (msg->z > 0.0); // 利用 Z > 0 作為啟用追蹤的開關
+                RCLCPP_INFO(this->get_logger(), "Tracking State Updated: %s, Center: (%.2f, %.2f)", 
+                            tracking_active_ ? "ON" : "OFF", center_x_, center_y_);
+            });
+
         set_altitude_done_pub_ = this->create_publisher<std_msgs::msg::Bool>("/set_flight_alt_done", 1);
         set_yaw_done_pub_ = this->create_publisher<std_msgs::msg::Bool>("/set_yaw_done", 1);
         // 發布修正後的速度給飛控
@@ -58,11 +68,13 @@ public:
 
 private:
     bool tracking_active_;
+    double center_x_ = 0.0;
+    double center_y_ = 0.0;
     bool is_on_yaw_= true;
     bool start_control_alt = false;
     bool is_on_altitude_ = true;
     double target_yaw_ = 0.0;
-    const double yaw_kp_ = 0.8;
+    const double yaw_kp_ = 1.0;
     const double angular_gain_ = 1.5;
     const double max_angular_vel_ = 0.5;
     const double z_vel_kp_ = 0.5;
@@ -78,9 +90,12 @@ private:
     rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_nav_sub_;
     rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr set_flight_altitude_sub_;
     rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr set_yaw_sub_;
+    rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr tracking_center_sub_;
+    
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr set_altitude_done_pub_;
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr set_yaw_done_pub_;
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
+
     rclcpp::TimerBase::SharedPtr controller_timer_;
 
     std::optional<geometry_msgs::msg::TransformStamped>
@@ -113,6 +128,35 @@ private:
         return z_vel;
     }
 
+    double tracking_orientation_culculate(double current_x,
+        double current_y, double qw, double qz) {
+
+        double dx = center_x_ - current_x;
+        double dy = center_y_ - current_y;
+        double dist = std::sqrt(dx * dx + dy * dy);
+        
+        if (dist < 1e-6) {
+            return 0.0;
+        }
+
+        // Robot heading (r_cos, r_sin)
+        double r_cos = qw * qw - qz * qz;
+        double r_sin = 2.0 * qw * qz;
+
+        // Desired heading (d_cos, d_sin)
+        double d_cos = dx / dist;
+        double d_sin = dy / dist;
+
+        // Error rotation
+        double e_cos = d_cos * r_cos + d_sin * r_sin;
+        double e_sin = d_sin * r_cos - d_cos * r_sin;
+
+        // Angular P-controller
+        double yaw_error = std::atan2(e_sin, e_cos);
+        double angular_z = yaw_kp_ * yaw_error;
+        return std::clamp(angular_z, -max_angular_vel_, max_angular_vel_);
+    }
+
     void cmd_vel_callback(const geometry_msgs::msg::Twist::SharedPtr msg) {
 
         auto transform = lookup_transform("map", "body");
@@ -124,6 +168,21 @@ private:
         geometry_msgs::msg::Twist new_cmd = *msg;
         if (start_control_alt) {
             new_cmd.linear.z = altitude_controller(target_altitude_, current_z);
+        }
+
+        double linear_speed_sq = (msg->linear.x * msg->linear.x) + (msg->linear.y * msg->linear.y);
+        if (linear_speed_sq < 0.0001) {
+            // 如果nav2採取剎車動作就別旋轉
+            cmd_pub_->publish(*msg);
+            return;
+        }
+
+        if (tracking_active_) {
+            double current_x = transform->transform.translation.x;
+            double current_y = transform->transform.translation.y;
+            double qz = transform->transform.rotation.z;
+            double qw = transform->transform.rotation.w;
+            new_cmd.angular.z = tracking_orientation_culculate(current_x, current_y, qw, qz);
         }
         
         cmd_pub_->publish(new_cmd);
@@ -156,7 +215,7 @@ private:
             }
         }
         
-        if (!is_on_yaw_) {
+        if (!is_on_yaw_ && !tracking_active_) {
             new_cmd.angular.z = orientation_controller(target_yaw_, current_yaw);
             RCLCPP_INFO(this->get_logger(), "Target: %f ,current: %f", target_yaw_, current_yaw);
             if (new_cmd.angular.z == 0.0) {
