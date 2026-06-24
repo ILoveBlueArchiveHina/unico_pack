@@ -51,8 +51,6 @@ public:
         // 發布修正後的速度給飛控
         cmd_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
 
-        
-
         controller_timer_ = this->create_wall_timer(
             100ms, std::bind(&NavVelocityTracker::control_loop, this));
         
@@ -65,13 +63,14 @@ private:
     double center_y_ = 0.0;
     const double angular_gain_ = 1.5;
     const double max_angular_vel_ = 0.5;
-    const double z_vel_kp = 0.5;
-    const double max_z_vel = 0.5;   // m/s
+    const double z_vel_kp_ = 0.5;
+    const double max_z_vel_ = 0.5;   // m/s
     const double MAXIMUM_Z_TOLERANCE = 0.05;  // m
     const double MINIMUM_Z_VEL = 0.05;     // m/s
     double yaw_align_threshold_;
     double target_altitude_;
     bool is_on_altitude_ = true;
+    bool start_control_alt = false;
 
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
@@ -97,6 +96,16 @@ private:
         target_altitude_ = msg->data;
         is_on_altitude_ = false;
         return;
+    }
+
+    double altitude_controller(const double & target, const double & current) {
+        double error = target - current;
+        if (std::abs(error) < MAXIMUM_Z_TOLERANCE) {
+            return 0.0;
+        }
+        double z_vel = error * z_vel_kp_;
+        z_vel = std::clamp(z_vel, -max_z_vel_, max_z_vel_);
+        return z_vel;
     }
 
     void cmd_vel_callback(const geometry_msgs::msg::Twist::SharedPtr msg) {
@@ -169,14 +178,9 @@ private:
         new_cmd.linear.x = e_cos * msg->linear.x + e_sin * msg->linear.y;
         new_cmd.linear.y = -e_sin * msg->linear.x + e_cos * msg->linear.y;
 
-        double z_pos_error = target_altitude_ - robot_z;
-        double z_vel = z_pos_error * z_vel_kp;
-        z_vel = std::clamp(z_vel, -max_z_vel, max_z_vel);
-
-        if (is_on_altitude_ && std::abs(z_pos_error) > MAXIMUM_Z_TOLERANCE) {
-            new_cmd.linear.z = z_vel;
-        } else {
-            new_cmd.linear.z = msg->linear.z;
+        
+        if (start_control_alt) {
+            new_cmd.linear.z = altitude_controller(target_altitude_, robot_z);
         }
         
         new_cmd.angular.z = angular_z;
@@ -195,19 +199,18 @@ private:
         }
 
         double robot_z = transform->transform.translation.z;
-        double z_pos_error = target_altitude_ - robot_z;
-        if (std::abs(z_pos_error) < MAXIMUM_Z_TOLERANCE) {
-            is_on_altitude_ = true;
-            std_msgs::msg::Bool msg;
-            msg.data = true;
-            set_altitude_done_pub_->publish(msg);
-            return;
-        }
-        double z_vel = z_pos_error * z_vel_kp;
-        z_vel = std::clamp(z_vel, -max_z_vel, max_z_vel);
         
         geometry_msgs::msg::Twist new_cmd;
-        new_cmd.linear.z = z_vel;
+        if (!is_on_altitude_) {
+            new_cmd.linear.z = altitude_controller(target_altitude_, robot_z);
+            if (new_cmd.linear.z == 0.0) {
+                is_on_altitude_ = true;
+                start_control_alt = true;
+                std_msgs::msg::Bool msg;
+                msg.data = true;
+                set_altitude_done_pub_->publish(msg);
+            }
+        }
         cmd_pub_->publish(new_cmd);
     }
 };
