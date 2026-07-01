@@ -22,6 +22,7 @@ bt_navigator:
       - nav2_goal_updater_node_bt_node
       - nav2_globally_updated_goal_condition_bt_node
       - nav2_path_expiring_timer_condition
+      - nav2_remove_passed_goals_action_bt_node
 
 bt_navigator_navigate_to_pose_rclcpp_node:
   ros__parameters:
@@ -76,7 +77,7 @@ controller_server:
       vx_samples: 20
       vy_samples: 20
       vtheta_samples: 1                
-      sim_time: 1.7                    
+      sim_time: 1.0                    
       linear_granularity: 0.05
       angular_granularity: 0.025
       trans_stopped_velocity: 0.25
@@ -200,7 +201,7 @@ planner_server:
       use_final_approach_orientation: false # Whether to set the final path pose at the goal's orientation to the requested orientation (false) or in line with the approach angle so the robot doesn't rotate to heading (true)
       smoother:
         max_iterations: 1000
-        w_smooth: 0.3
+        w_smooth: 0.1
         w_data: 0.2
         tolerance: 1.0e-10
 

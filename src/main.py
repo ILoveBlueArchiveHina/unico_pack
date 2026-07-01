@@ -131,12 +131,15 @@ class ManagementNode(Node):
         except Exception as e:
             self.get_logger().error(f"Cannot connect to MQTT: {e}")
 
+    def clear_task_queue(self):
+        self.task_queue.clear()
+        self.is_processing = False
+        return
 
     def _low_battery_process(self):
         """ 當電量低時執行 """
         self.remaining_task_ids = self._get_remaining_tasks_list()
-        self.task_queue.clear()
-        self.is_processing = False
+        self.clear_task_queue()
         self.record_rosbag("off")
         self._cancel_current_task()
         self._fly_to_safe_zone(PROCESS_STATE_RETURN_HOME)
@@ -366,6 +369,7 @@ class ManagementNode(Node):
         future.add_done_callback(_call_mode_response)
 
     def _abort_flight_sequence(self):
+        self.send_cancelled_task_list(self._get_remaining_tasks_list())
         self.is_processing = False
         self.current_status = 'error'
 
@@ -613,8 +617,7 @@ class ManagementNode(Node):
 
         cancelled_ids = self._get_remaining_tasks_list()
 
-        self.task_queue.clear()
-        self.is_processing = False
+        self.clear_task_queue()
         # Note: mission_dispatcher's active Nav2 goal is NOT cancelled here.
         # A future improvement is to publish a cancel signal to mission_dispatcher.
 

@@ -217,7 +217,6 @@ private:
         
         if (!is_on_yaw_ && !tracking_active_) {
             new_cmd.angular.z = orientation_controller(target_yaw_, current_yaw);
-            RCLCPP_INFO(this->get_logger(), "Target: %f ,current: %f", target_yaw_, current_yaw);
             if (new_cmd.angular.z == 0.0) {
                 is_on_yaw_ = true;
                 std_msgs::msg::Bool msg;

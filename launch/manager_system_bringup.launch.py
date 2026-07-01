@@ -25,6 +25,9 @@ def generate_launch_description():
             Node(
             package='unico_pack',
             executable='mission_dispatcher_v4.py',
+            parameters=[{
+                'tracking_mode': True,
+            }],
             output='screen',
             prefix=['taskset -c 1,2,3']
             )]

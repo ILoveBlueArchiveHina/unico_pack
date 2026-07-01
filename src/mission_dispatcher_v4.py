@@ -72,7 +72,8 @@ class Nav2Executor(Node):
         self._action_client = ActionClient(self, FollowWaypoints, 'follow_waypoints', callback_group=self.callback_group)
         
         # Tracking State
-        self.tracking_mode = True
+        self.declare_parameter("tracking_mode", True)
+        self.tracking_mode = self.get_parameter("tracking_mode").value
         self.center_x = 0.0
         self.center_y = 0.0
         self.angular_gain = 1.5
