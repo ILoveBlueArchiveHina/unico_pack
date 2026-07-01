@@ -6,34 +6,6 @@ from launch.substitutions import Command
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 
-################################ Livox Driver ROS2 #####################################
-################### user configure parameters for ros2 start ###################
-xfer_format   = 1    # 0-Pointcloud2(PointXYZRTL), 1-customized pointcloud format
-multi_topic   = 0    # 0-All LiDARs share the same topic, 1-One LiDAR one topic
-data_src      = 0    # 0-lidar, others-Invalid data src
-publish_freq  = 10.0 # freqency of publish, 5.0, 10.0, 20.0, 50.0, etc.
-output_type   = 0
-frame_id      = 'livox_frame'
-lvx_file_path = '/home/livox/livox_test.lvx'
-cmdline_bd_code = 'livox0000000001'
-
-cur_path = os.path.split(os.path.realpath(__file__))[0] + '/'
-cur_config_path = cur_path + '../config'
-user_config_path = os.path.join(cur_config_path, 'MID360_config.json')
-################### user configure parameters for ros2 end #####################
-
-livox_ros2_params = [
-    {"xfer_format": xfer_format},
-    {"multi_topic": multi_topic},
-    {"data_src": data_src},
-    {"publish_freq": publish_freq},
-    {"output_data_type": output_type},
-    {"frame_id": frame_id},
-    {"lvx_file_path": lvx_file_path},
-    {"user_config_path": user_config_path},
-    {"cmdline_input_bd_code": cmdline_bd_code}
-]
-
 def generate_launch_description():
     unico_pack = get_package_share_directory('unico_pack')
     livox_ros_driver2 = get_package_share_directory('livox_ros_driver2')
@@ -50,39 +22,39 @@ def generate_launch_description():
     nav_bringup_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(unico_pack, 'launch', 'custom_bringup_v2.launch.py')))
 
-    first_launch = [
-        mavros_launch,
+#    first_launch = [
+#        mavros_launch,
 
-        Node(
-            package='unico_pack',
-            executable='fastlio_to_mavros_only_pose',
-            prefix = ['taskset -c 1,2,3']
-        ),
+#        Node(
+#            package='unico_pack',
+#            executable='fastlio_to_mavros_only_pose',
+#            prefix = ['taskset -c 1,2,3']
+#        ),
+#
+#        TimerAction(
+#            period=3,
+#            actions=[
+#                Node(
+#                    package='livox_ros_driver2',
+#                    executable='livox_ros_driver2_node',
+#                    name='livox_lidar_publisher',
+#                    output='screen',
+#                    parameters=livox_ros2_params
+#                )
+#            ]
+#        ),
 
-        TimerAction(
-            period=3,
-            actions=[
-                Node(
-                    package='livox_ros_driver2',
-                    executable='livox_ros_driver2_node',
-                    name='livox_lidar_publisher',
-                    output='screen',
-                    parameters=livox_ros2_params
-                )
-            ]
-        ),
-
-        TimerAction(
-            period=6,
-            actions=[
-                Node(
-                    package='unico_pack',
-                    executable='fast_lio_lifecycle_wrapper',
-                    prefix = ['taskset -c 1,2,3']
-                )
-            ]
-        ),
-    ]
+#        TimerAction(
+#            period=6,
+#            actions=[
+#                Node(
+#                    package='unico_pack',
+#                    executable='fast_lio_lifecycle_wrapper',
+#                    prefix = ['taskset -c 1,2,3']
+#                )
+#            ]
+#        ),
+#    ]
 
     lifecycle_nodes = [
         
@@ -91,26 +63,12 @@ def generate_launch_description():
     
 
     return LaunchDescription([
-        
-
-
-        nav_bringup_launch,
-        Node(
-            package='unico_pack',
-            executable='precision_landing_lifecycle',
-            prefix = ['taskset -c 1,2,3']
-        ),
-
-        Node(
-            package='unico_pack',
-            executable='precision_landing_lifecycle',
-            prefix = ['taskset -c 1,2,3']
-        ),
-
-        Node(
-            package='unico_pack',
-            executable='rosbag_lifecycle',
-            prefix = ['taskset -c 1,2,3']
+        manager_launch,
+        TimerAction(
+            period=6,
+            actions=[
+                nav_bringup_launch
+            ]
         )
 
     ])
