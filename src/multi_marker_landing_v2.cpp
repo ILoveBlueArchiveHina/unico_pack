@@ -38,35 +38,24 @@ class MultiMarkerLanding : public rclcpp::Node {
 public:
     MultiMarkerLanding() : Node("multi_marker_landing_cpp") {
         // 參數初始化
+        // MARKER_IDS = {10, 20, 30, 440};
+        // INNER_MARKER_IDS = {550};
         MARKER_IDS = {10, 20, 30, 40};
         INNER_MARKER_IDS = {100, 200, 300, 400};
         
         // Publishers
         vel_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 1);
-        is_landed_pub_ = this->create_publisher<std_msgs::msg::Bool>("/is_landed", 1);
         
         // Subscribers
         marker_sub_ = this->create_subscription<aruco_msgs::msg::MarkerArray>(
             "/marker_publisher/markers", 1,
             std::bind(&MultiMarkerLanding::markers_callback, this, std::placeholders::_1));
-            
-        extended_state_sub_ = this->create_subscription<mavros_msgs::msg::ExtendedState>(
-            "/mavros/extended_state", 1,
-            std::bind(&MultiMarkerLanding::extended_state_callback, this, std::placeholders::_1));
-            
-        altitude_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
-            "/Odometry", 1,
-            std::bind(&MultiMarkerLanding::altitude_callback, this, std::placeholders::_1));
-            
-        // Service Client
-        arming_client_ = this->create_client<mavros_msgs::srv::CommandBool>("/mavros/cmd/arming");
-        
+             
         // TF Broadcaster
         tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
         
         // Timer (10Hz)
         timer_ = this->create_wall_timer(100ms, std::bind(&MultiMarkerLanding::control_loop, this));
-        ground_check_timer_ = this->create_wall_timer(1000ms, std::bind(&MultiMarkerLanding::ground_check_cb, this));
         
         last_valid_time_ = this->now();
         RCLCPP_INFO(this->get_logger(), "Multi-marker landing controller initialized");
@@ -77,7 +66,7 @@ private:
     std::vector<int> MARKER_IDS;
     std::vector<int> INNER_MARKER_IDS;
     const int MIN_MARKERS_REQUIRED = 3;
-    const double HALF_DISTANCE_BETWEEN_MARKERS = 0.1;  // m
+    const double HALF_DISTANCE_BETWEEN_MARKERS = 0.25;  // m
     const double DESCENT_SPEED = -0.1;
 
     const double MAXIMUM_XY_SPEED = 0.3;
@@ -85,7 +74,16 @@ private:
 
     const double Kp_xy = 0.5;
     const double Kp_yaw = 0.3;
-    
+    const double Ki_xy = 0.1;
+    const double Ki_yaw = 0.05;
+
+    // I 項只在誤差落在此帶寬內才累積，避免大誤差/遠距離移動時 windup
+    const double INTEGRAL_BAND_XY = 0.10;   // m
+    const double INTEGRAL_BAND_YAW = 2.0;   // deg
+    const double I_MAX_XY = 0.15;           // m/s, Ki*integral 貢獻上限
+    const double I_MAX_YAW = 0.15;          // rad/s, Ki*integral 貢獻上限
+    const double CONTROL_DT = 0.1;          // 對應 100ms timer
+
     const double ALIGNMENT_THRESHOLD_XY = 0.05;
     const double ALIGNMENT_THRESHOLD_YAW = 1.0;
     const double ALIGNMENT_HOLD_TIME = 0.5;
@@ -100,29 +98,23 @@ private:
     
     int last_marker_count_ = 0;
     int last_inner_marker_count_ = 0;
-    double current_altitude_ = 0.0;
-    
-    bool disarm_called_ = false;
-    bool landing_complete_ = false;
     
     double aligned_time_ = -1.0;
     bool aligned_done_ = false;
+
+    double integral_x_ = 0.0;
+    double integral_y_ = 0.0;
+    double integral_yaw_ = 0.0;
     
     bool last_no_center_ = false;
     rclcpp::Time last_valid_time_;
     
-    mavros_msgs::msg::ExtendedState current_extended_state_;
 
     // Publishers / Subscribers / Services
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr vel_pub_;
-    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr is_landed_pub_;
     rclcpp::Subscription<aruco_msgs::msg::MarkerArray>::SharedPtr marker_sub_;
-    rclcpp::Subscription<mavros_msgs::msg::ExtendedState>::SharedPtr extended_state_sub_;
-    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr altitude_sub_;
-    rclcpp::Client<mavros_msgs::srv::CommandBool>::SharedPtr arming_client_;
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     rclcpp::TimerBase::SharedPtr timer_;
-    rclcpp::TimerBase::SharedPtr ground_check_timer_;
 
     void markers_callback(const aruco_msgs::msg::MarkerArray::SharedPtr msg) {
         detected_markers_.clear();
@@ -155,7 +147,7 @@ private:
                 
                 if (is_outer) detected_markers_[marker.id] = md;
                 if (is_inner) detected_inner_markers_[marker.id] = md;
-            }
+            } 
         }
         
         bool has_outer = detected_markers_.size() > 0;
@@ -231,10 +223,11 @@ private:
         const double H = HALF_DISTANCE_BETWEEN_MARKERS;
         // offset from center to each marker: center = marker - offset
         const std::map<int, std::pair<double, double>> offsets = {
-            {10, {-H, -H}},   // top-left:    left(-x), forward(+y)
-            {20, { H, -H}},   // top-right:   right(-x), forward(+y)
-            {30, {-H,  H}},   // bottom-left: left(+x), backward(-y)
-            {40, { H,  H}},   // bottom-right: right(-x), backward(-y)
+            // 請注意： 相機座標y+朝上，但marker擺放y+朝下，因此下面象限定義y正負須相反
+            {10, {-H, -H}},   // top-left:     left(-x), forward(-y)
+            {20, { H, -H}},   // top-right:    right(x), forward(-y)
+            {30, {-H,  H}},   // bottom-left:  left(-x), backward(y)
+            {40, { H,  H}},   // bottom-right: right(x), backward(y)
         };
 
         double sum_cx = 0, sum_cy = 0, sum_cz = 0, sum_yaw = 0;
@@ -305,7 +298,7 @@ private:
     void update_buffer_and_tf(const CenterData& center) {
         if (marker_buffer_.size() >= 10) marker_buffer_.pop_front();
         marker_buffer_.push_back(center);
-        publish_marker_transforms();
+        // publish_marker_transforms();
     }
 
     bool get_smoothed_center(CenterData& smoothed) {
@@ -324,47 +317,47 @@ private:
         return true;
     }
 
-    void publish_marker_transforms() {
-        if (!has_landing_center_ || detected_markers_.size() < 2) return;
+    // void publish_marker_transforms() {
+    //     if (!has_landing_center_ || detected_markers_.size() < 2) return;
         
-        rclcpp::Time now = this->now();
-        geometry_msgs::msg::TransformStamped t_origin;
-        t_origin.header.stamp = now;
-        t_origin.header.frame_id = "camera_link";
-        t_origin.child_frame_id = "aruco_origin";
+    //     rclcpp::Time now = this->now();
+    //     geometry_msgs::msg::TransformStamped t_origin;
+    //     t_origin.header.stamp = now;
+    //     t_origin.header.frame_id = "camera_link";
+    //     t_origin.child_frame_id = "aruco_origin";
         
-        t_origin.transform.translation.x = landing_center_.x;
-        t_origin.transform.translation.y = landing_center_.y;
-        t_origin.transform.translation.z = landing_center_.z;
+    //     t_origin.transform.translation.x = landing_center_.x;
+    //     t_origin.transform.translation.y = landing_center_.y;
+    //     t_origin.transform.translation.z = landing_center_.z;
         
-        tf2::Quaternion q;
-        q.setRPY(0, 0, landing_center_.yaw * M_PI / 180.0);
-        t_origin.transform.rotation.x = q.x();
-        t_origin.transform.rotation.y = q.y();
-        t_origin.transform.rotation.z = q.z();
-        t_origin.transform.rotation.w = q.w();
+    //     tf2::Quaternion q;
+    //     q.setRPY(0, 0, landing_center_.yaw * M_PI / 180.0);
+    //     t_origin.transform.rotation.x = q.x();
+    //     t_origin.transform.rotation.y = q.y();
+    //     t_origin.transform.rotation.z = q.z();
+    //     t_origin.transform.rotation.w = q.w();
         
-        tf_broadcaster_->sendTransform(t_origin);
+    //     tf_broadcaster_->sendTransform(t_origin);
         
-        for (const auto& pair : detected_markers_) {
-            const auto& m = pair.second;
-            geometry_msgs::msg::TransformStamped t_marker;
-            t_marker.header.stamp = now;
-            t_marker.header.frame_id = "aruco_origin";
-            t_marker.child_frame_id = "marker_" + std::to_string(m.id);
+    //     for (const auto& pair : detected_markers_) {
+    //         const auto& m = pair.second;
+    //         geometry_msgs::msg::TransformStamped t_marker;
+    //         t_marker.header.stamp = now;
+    //         t_marker.header.frame_id = "aruco_origin";
+    //         t_marker.child_frame_id = "marker_" + std::to_string(m.id);
             
-            t_marker.transform.translation.x = m.x - landing_center_.x;
-            t_marker.transform.translation.y = m.y - landing_center_.y;
-            t_marker.transform.translation.z = m.z - landing_center_.z;
+    //         t_marker.transform.translation.x = m.x - landing_center_.x;
+    //         t_marker.transform.translation.y = m.y - landing_center_.y;
+    //         t_marker.transform.translation.z = m.z - landing_center_.z;
             
-            t_marker.transform.rotation.x = m.qx;
-            t_marker.transform.rotation.y = m.qy;
-            t_marker.transform.rotation.z = m.qz;
-            t_marker.transform.rotation.w = m.qw;
+    //         t_marker.transform.rotation.x = m.qx;
+    //         t_marker.transform.rotation.y = m.qy;
+    //         t_marker.transform.rotation.z = m.qz;
+    //         t_marker.transform.rotation.w = m.qw;
             
-            tf_broadcaster_->sendTransform(t_marker);
-        }
-    }
+    //         tf_broadcaster_->sendTransform(t_marker);
+    //     }
+    // }
 
     bool check_alignment(const CenterData& center) {
         double xy_offset = std::sqrt(center.x * center.x + center.y * center.y);
@@ -387,47 +380,6 @@ private:
         return false;
     }
 
-    void call_disarm() {
-        if (disarm_called_) return;
-        
-        if (!arming_client_->wait_for_service(1s)) {
-            RCLCPP_WARN(this->get_logger(), "MAVROS arming service 不可用");
-            return;
-        }
-        
-        auto request = std::make_shared<mavros_msgs::srv::CommandBool::Request>();
-        request->value = false;
-        
-        RCLCPP_INFO(this->get_logger(), "已對齊 ArUco 標記，呼叫 MAVROS 執行上鎖命令...");
-        
-        using ServiceResponseFuture = rclcpp::Client<mavros_msgs::srv::CommandBool>::SharedFuture;
-        auto response_received_callback = [this](ServiceResponseFuture future) {
-            auto response = future.get();
-            if (response->success) {
-                RCLCPP_INFO(this->get_logger(), "✅ 成功執行上鎖命令");
-                std_msgs::msg::Bool msg;
-                msg.data = true;
-                is_landed_pub_->publish(msg);
-                landing_complete_ = true;
-            } else {
-                RCLCPP_ERROR(this->get_logger(), "❌ 上鎖命令執行失敗");
-            }
-        };
-        
-        arming_client_->async_send_request(request, response_received_callback);
-        disarm_called_ = true;
-    }
-
-    bool _is_on_ground() {
-        if (current_extended_state_.landed_state == mavros_msgs::msg::ExtendedState::LANDED_STATE_ON_GROUND){
-            return true;
-        }
-        else {
-            return false;
-        }
-
-    }
-
     void control_loop() {
         double dt_lost = (this->now() - last_valid_time_).seconds();
         geometry_msgs::msg::Twist vel_cmd;
@@ -440,9 +392,10 @@ private:
             vel_cmd.linear.z = DESCENT_SPEED;
             vel_pub_->publish(vel_cmd);
             marker_buffer_.clear();
+            integral_x_ = integral_y_ = integral_yaw_ = 0.0;
             return;
         }
-        
+
         CenterData center;
         if (!get_smoothed_center(center)) {
             if (!last_no_center_) {
@@ -451,6 +404,7 @@ private:
                 vel_cmd.linear.z = DESCENT_SPEED;
                 vel_pub_->publish(vel_cmd);
             }
+            integral_x_ = integral_y_ = integral_yaw_ = 0.0;
             return;
         }
         last_no_center_ = false;
@@ -459,14 +413,31 @@ private:
         bool xy_aligned = std::sqrt(center.x * center.x + center.y * center.y) < ALIGNMENT_THRESHOLD_XY;
 
         if (aligned_done_) vel_cmd.linear.z = DESCENT_SPEED;
-        
-        vel_cmd.linear.x = -Kp_xy * center.y;
-        vel_cmd.linear.y = -Kp_xy * center.x;
-        
+
+        if (std::abs(center.x) < INTEGRAL_BAND_XY && std::abs(center.y) < INTEGRAL_BAND_XY) {
+            integral_x_ += center.x * CONTROL_DT;
+            integral_y_ += center.y * CONTROL_DT;
+        } else {
+            integral_x_ = integral_y_ = 0.0;
+        }
+        double i_term_x = std::clamp(Ki_xy * integral_x_, -I_MAX_XY, I_MAX_XY);
+        double i_term_y = std::clamp(Ki_xy * integral_y_, -I_MAX_XY, I_MAX_XY);
+
+        vel_cmd.linear.x = -(Kp_xy * center.y + i_term_y);
+        vel_cmd.linear.y = -(Kp_xy * center.x + i_term_x);
+
         if (xy_aligned) {
-            vel_cmd.angular.z = -Kp_yaw * (center.yaw * M_PI / 180.0);
+            double yaw_err_rad = center.yaw * M_PI / 180.0;
+            if (std::abs(center.yaw) < INTEGRAL_BAND_YAW) {
+                integral_yaw_ += yaw_err_rad * CONTROL_DT;
+            } else {
+                integral_yaw_ = 0.0;
+            }
+            double i_term_yaw = std::clamp(Ki_yaw * integral_yaw_, -I_MAX_YAW, I_MAX_YAW);
+            vel_cmd.angular.z = -(Kp_yaw * yaw_err_rad + i_term_yaw);
         } else {
             vel_cmd.angular.z = 0.0;
+            integral_yaw_ = 0.0;
         }
         
         // 限制速度
@@ -482,26 +453,6 @@ private:
         if (!std::isfinite(vel_cmd.angular.z)) vel_cmd.angular.z = 0.0;
         
         vel_pub_->publish(vel_cmd);
-    }
-
-    void ground_check_cb() {
-        if (_is_on_ground()) {
-            vel_pub_->publish(geometry_msgs::msg::Twist());
-            RCLCPP_INFO(this->get_logger(), "Extended State 確認已著陸 (ON_GROUND)");
-            if (!disarm_called_) call_disarm();
-        }
-        if (landing_complete_) {
-            RCLCPP_INFO(this->get_logger(), "主程式檢測到降落完成，準備關閉");
-            rclcpp::shutdown();
-        }
-    }
-    
-    void extended_state_callback(const mavros_msgs::msg::ExtendedState::SharedPtr msg) {
-        current_extended_state_ = *msg;
-    }
-    
-    void altitude_callback(const nav_msgs::msg::Odometry::SharedPtr msg) {
-        current_altitude_ = msg->pose.pose.position.z;
     }
 };
 

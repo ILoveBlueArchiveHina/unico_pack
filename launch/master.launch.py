@@ -22,14 +22,14 @@ def generate_launch_description():
     nav_bringup_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(unico_pack, 'launch', 'custom_bringup_v2.launch.py')))
 
-#    first_launch = [
-#        mavros_launch,
+   first_launch = [
+       mavros_launch,
 
-#        Node(
-#            package='unico_pack',
-#            executable='fastlio_to_mavros_only_pose',
-#            prefix = ['taskset -c 1,2,3']
-#        ),
+       Node(
+           package='unico_pack',
+           executable='fastlio_to_mavros_only_pose',
+           prefix = ['taskset -c 1,2,3']
+       ),
 #
 #        TimerAction(
 #            period=3,
@@ -54,15 +54,16 @@ def generate_launch_description():
 #                )
 #            ]
 #        ),
-#    ]
+   ]
 
-    lifecycle_nodes = [
+    # lifecycle_nodes = [
         
-    ]
+    # ]
 
     
 
     return LaunchDescription([
+        first_launch,
         manager_launch,
         TimerAction(
             period=6,

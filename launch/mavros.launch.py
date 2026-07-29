@@ -28,24 +28,23 @@ def generate_launch_description():
             config_yaml,
         ]
     )
-    request_extended_state = TimerAction(
-        period=8.0,
-        actions=[
-            ExecuteProcess(
-                cmd=[
-                    'ros2', 'service', 'call', 
-                    '/mavros/set_message_interval', 
-                    'mavros_msgs/srv/MessageInterval', 
-                    '"{message_id: 245, message_rate: 1.0}"'
-                ],
-                shell=True,
-                output='screen'
-            )
-        ]
-    )
+    # request_extended_state = TimerAction(
+    #     period=8.0,
+    #     actions=[
+    #         ExecuteProcess(
+    #             cmd=[
+    #                 'ros2', 'service', 'call', 
+    #                 '/mavros/set_message_interval', 
+    #                 'mavros_msgs/srv/MessageInterval', 
+    #                 '"{message_id: 245, message_rate: 1.0}"'
+    #             ],
+    #             shell=True,
+    #             output='screen'
+    #         )
+    #     ]
+    # )
 
 
     return LaunchDescription([
         mavros_node_launch,
-        request_extended_state
     ])

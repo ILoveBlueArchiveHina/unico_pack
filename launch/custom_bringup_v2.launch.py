@@ -14,6 +14,7 @@ def generate_launch_description():
     params_file = LaunchConfiguration('params_file')
     use_sim_time = LaunchConfiguration('use_sim_time')
     map_file = LaunchConfiguration('map_file')
+    bt_xml = LaunchConfiguration('bt_xml')
     user = LaunchConfiguration('user')
     map_odom_tf_x = LaunchConfiguration('map_odom_tf_x')
     map_odom_tf_y = LaunchConfiguration('map_odom_tf_y')
@@ -33,6 +34,13 @@ def generate_launch_description():
     declare_map = DeclareLaunchArgument(
         'map_file',
         default_value=default_map_file
+    )
+
+    # NavigateToPose 行為樹。預設 drone_nav.xml（DWB 流程）；
+    # 要用航向控制時傳 bt_xml:=<config>/drone_nav_face_target.xml
+    declare_bt_xml = DeclareLaunchArgument(
+        'bt_xml',
+        default_value=default_xml_file
     )
 
     declare_user = DeclareLaunchArgument(
@@ -122,13 +130,25 @@ def generate_launch_description():
                     ],
                     prefix=['taskset -c 1,2,3'],
                 ),]),
+        # TimerAction(
+        #     period=4.0,
+        #     actions=[
+        #         Node(
+        #             package='nav2_behaviors',
+        #             executable='behavior_server',
+        #             name='behavior_server',
+        #             output='screen',
+        #             parameters=[params_file, {'use_sim_time': use_sim_time}],
+        #             prefix=['taskset -c 1,2,3'],
+        # ),]),
+
         TimerAction(
             period=4.0,
             actions=[
                 Node(
-                    package='nav2_behaviors',
-                    executable='behavior_server',
-                    name='behavior_server',
+                    package='nav2_smoother',
+                    executable='smoother_server',
+                    name='smoother_server',
                     output='screen',
                     parameters=[params_file, {'use_sim_time': use_sim_time}],
                     prefix=['taskset -c 1,2,3'],
@@ -155,7 +175,7 @@ def generate_launch_description():
                     output='screen',
                     parameters=[params_file, {
                         'use_sim_time': use_sim_time,
-                        'default_nav_to_pose_bt_xml': default_xml_file,
+                        'default_nav_to_pose_bt_xml': bt_xml,
                         'default_nav_through_poses_bt_xml': os.path.join(unico_pack_path, 'config', 'drone_nav_through_poses.xml'),
                         }],
             prefix=['taskset -c 1,2,3'],
@@ -203,12 +223,13 @@ def generate_launch_description():
                 output='screen',
                 parameters=[{
                     'use_sim_time': use_sim_time,
-                    'autostart': True,
+                    'autostart': False,
                     'node_names': [
                         'map_server',
                         'planner_server',
                         'controller_server',
-                        'behavior_server',
+                        'smoother_server',
+                        # 'behavior_server',
                         'waypoint_follower',
                         'bt_navigator',
                         'velocity_smoother'

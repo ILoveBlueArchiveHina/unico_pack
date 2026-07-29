@@ -14,7 +14,8 @@ def generate_launch_description():
                 'home_pose_x': 2.0,
                 'home_pose_y': -2.05,
                 'rosbag_folder_path': '/home/uni-co-jetson/rosbag',
-                'mqtt_broker': 'broker.emqx.io'
+                'mqtt_broker': '192.168.166.83',
+                'nas_mount_path': '/mnt/data'
             }],
             prefix=['taskset -c 1,2,3']
         ),
@@ -52,6 +53,9 @@ def generate_launch_description():
         Node(
             package='unico_pack',
             executable='precision_landing_lifecycle',
+            parameters=[{
+                'use_sim_time': False,
+            }],
             prefix = ['taskset -c 1,2,3']
         ),
 

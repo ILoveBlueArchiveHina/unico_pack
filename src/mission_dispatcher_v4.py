@@ -198,20 +198,16 @@ class Nav2Executor(Node):
             result = future.result().result
             if len(result.missed_waypoints) == 0:
                 self.get_logger().info('Phase 1: Approach Complete. Starting Phase 2: Inspection Loop.')
-                if self.tracking_mode:
-                    self.process_next_cargo_leg(failed_faces=self.failed_faces)
-                else:
-                    self.set_target_yaw(self.current_leg_index)
-
-                rotate_count = 0
-                self.current_start_index = 0
-                if rotate_count > 0 and self.cargo_queue:
-                    self.cargo_queue = self.cargo_queue[rotate_count:] + self.cargo_queue[:rotate_count]
-                self.current_leg_index = 0
                 ros_msg = Bool()
                 ros_msg.data = True
                 self.ready_to_record_rosbag_pub.publish(ros_msg)
-                
+
+                self.current_start_index = 0
+                self.current_leg_index = 0
+
+                # Non-blocking 2s wait for rosbag recording to actually start
+                # before beginning inspection (one-shot timer, self-destroys).
+                self._rosbag_ready_timer = self.create_timer(2.0, self._start_inspection_after_delay)
             else:
                 self.get_logger().warn(
                     f'Phase 1: Approach failed for start point {self.current_start_index+1}/{len(self.expanded_points)}, trying next...')
@@ -219,6 +215,14 @@ class Nav2Executor(Node):
                 self.try_next_start_point()
 
         future.add_done_callback(approach_response_callback)
+
+    def _start_inspection_after_delay(self):
+        """One-shot timer callback: Wait 2 seconds for the image to stabilize before starting the inspection."""
+        self._rosbag_ready_timer.destroy()
+        if self.tracking_mode:
+            self.process_next_cargo_leg(failed_faces=self.failed_faces)
+        else:
+            self.set_target_yaw(self.current_leg_index)
 
     def set_target_yaw(self, current_point):
         msg = Float64()
@@ -333,6 +337,11 @@ class Nav2Executor(Node):
              result_msg.result = 1
              self.get_logger().info('Task Completed Successfully!')
              
+        tracking_center = Point()
+        tracking_center.x = 0.0
+        tracking_center.y = 0.0
+        tracking_center.z = 0.0         # Signal for turn-off tracking
+        self.tracking_active_pub.publish(tracking_center)
         self.result_pub.publish(result_msg)
 
     

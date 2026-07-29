@@ -6,36 +6,22 @@
 
 using rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface;
 
-class UsbCamLifecycleWrapper : public rclcpp_lifecycle::LifecycleNode {
+class LivoxLifecycleWrapper : public rclcpp_lifecycle::LifecycleNode {
 public:
-    UsbCamLifecycleWrapper() : rclcpp_lifecycle::LifecycleNode("precision_landing_lifecycle"), child_pid_(-1) {
-        RCLCPP_INFO(get_logger(), "precision_landing_lifecycle instantiated.");
+    LivoxLifecycleWrapper() : rclcpp_lifecycle::LifecycleNode("livox_lifecycle"), child_pid_(-1) {
+        RCLCPP_INFO(get_logger(), "livox_lifecycle instantiated.");
         configure_timer_ = create_wall_timer(
             std::chrono::milliseconds(500),
             [this]() { configure_timer_.reset(); this->configure(); });
     }
 
     LifecycleNodeInterface::CallbackReturn on_configure(const rclcpp_lifecycle::State &) {
-        this->get_parameter_or("use_sim_time", use_sim_time_, false);
-
-        if (use_sim_time_) {
-            RCLCPP_INFO(get_logger(), "Configuring... use_sim_time=true, skipping /dev/video0 check.");
-            return LifecycleNodeInterface::CallbackReturn::SUCCESS;
-        }
-
-        RCLCPP_INFO(get_logger(), "Configuring... Checking /dev/video0");
-        if (access("/dev/video0", F_OK) == -1) {
-            RCLCPP_ERROR(get_logger(), "Camera /dev/video0 not found!");
-            return LifecycleNodeInterface::CallbackReturn::FAILURE;
-        }
+        RCLCPP_INFO(get_logger(), "Configuring livox_lifecycle...");
         return LifecycleNodeInterface::CallbackReturn::SUCCESS;
     }
 
     LifecycleNodeInterface::CallbackReturn on_activate(const rclcpp_lifecycle::State & state) {
-        const char * launch_file = use_sim_time_ ? "precision_landing_sitl.launch.py" : "precision_landing.launch.py";
-
-        RCLCPP_INFO(get_logger(), "Activating... Starting precision_landing process (use_sim_time=%s, launch_file=%s).",
-                    use_sim_time_ ? "true" : "false", launch_file);
+        RCLCPP_INFO(get_logger(), "Activating... Starting Livox MID360 driver process.");
 
         child_pid_ = fork();
         if (child_pid_ < 0) {
@@ -44,16 +30,17 @@ public:
         }
         else if (child_pid_ == 0) {
             setsid();
-            execlp("taskset", "taskset", "-c", "1,2,3", "ros2", "launch", "unico_pack", launch_file, nullptr);
+            execlp("taskset", "taskset", "-c", "4,5",
+                   "ros2", "launch", "livox_ros_driver2", "msg_MID360_launch.py", nullptr);
             exit(1);
         }
 
-        RCLCPP_INFO(get_logger(), "precision_landing started with PID: %d", child_pid_);
+        RCLCPP_INFO(get_logger(), "Livox MID360 driver started with PID: %d", child_pid_);
 
         // 監控子行程是否崩潰，每 500ms 檢查一次
         monitor_timer_ = this->create_wall_timer(
             std::chrono::milliseconds(500),
-            std::bind(&UsbCamLifecycleWrapper::monitor_child, this));
+            std::bind(&LivoxLifecycleWrapper::monitor_child, this));
 
         return LifecycleNodeInterface::CallbackReturn::SUCCESS;
     }
@@ -78,7 +65,6 @@ public:
 
 private:
     pid_t child_pid_;
-    bool use_sim_time_ = false;
     rclcpp::TimerBase::SharedPtr configure_timer_;
     rclcpp::TimerBase::SharedPtr monitor_timer_;
 
@@ -89,7 +75,7 @@ private:
         pid_t result = waitpid(child_pid_, &status, WNOHANG);
         if (result == child_pid_) {
             // 子行程已死，但我們沒有要求它停
-            RCLCPP_ERROR(get_logger(), "precision_landing process died unexpectedly (PID %d)! Triggering deactivate.", child_pid_);
+            RCLCPP_ERROR(get_logger(), "Livox MID360 driver process died unexpectedly (PID %d)! Triggering deactivate.", child_pid_);
             child_pid_ = -1;
             monitor_timer_.reset();
             // 觸發 lifecycle error，讓上層 manager 知道
@@ -108,7 +94,7 @@ private:
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             int status;
             if (waitpid(child_pid_, &status, WNOHANG) == child_pid_) {
-                RCLCPP_INFO(get_logger(), "precision_landing stopped cleanly.");
+                RCLCPP_INFO(get_logger(), "Livox MID360 driver stopped cleanly.");
                 child_pid_ = -1;
                 return;
             }
@@ -124,7 +110,7 @@ private:
 
 int main(int argc, char ** argv) {
     rclcpp::init(argc, argv);
-    auto node = std::make_shared<UsbCamLifecycleWrapper>();
+    auto node = std::make_shared<LivoxLifecycleWrapper>();
     rclcpp::spin(node->get_node_base_interface());
     rclcpp::shutdown();
     return 0;

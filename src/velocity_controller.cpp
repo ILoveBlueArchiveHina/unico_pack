@@ -31,6 +31,12 @@ public:
                 is_on_yaw_ = false;
             });
 
+        start_control_alt_signal_sub_ = this->create_subscription<std_msgs::msg::Bool>(
+            "/start_alt_control", 1,
+            [this](const std_msgs::msg::Bool::SharedPtr msg) {
+                start_control_alt = msg->data;
+            });
+
         // 訂閱 Nav2 輸出的原始速度
         cmd_nav_sub_ = this->create_subscription<geometry_msgs::msg::Twist>(
             "/cmd_vel_nav", rclcpp::SystemDefaultsQoS(),
@@ -91,6 +97,7 @@ private:
     rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr set_flight_altitude_sub_;
     rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr set_yaw_sub_;
     rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr tracking_center_sub_;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr start_control_alt_signal_sub_;
     
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr set_altitude_done_pub_;
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr set_yaw_done_pub_;
@@ -177,13 +184,13 @@ private:
             return;
         }
 
-        if (tracking_active_) {
-            double current_x = transform->transform.translation.x;
-            double current_y = transform->transform.translation.y;
-            double qz = transform->transform.rotation.z;
-            double qw = transform->transform.rotation.w;
-            new_cmd.angular.z = tracking_orientation_culculate(current_x, current_y, qw, qz);
-        }
+        // if (tracking_active_) {
+        //     double current_x = transform->transform.translation.x;
+        //     double current_y = transform->transform.translation.y;
+        //     double qz = transform->transform.rotation.z;
+        //     double qw = transform->transform.rotation.w;
+        //     new_cmd.angular.z = tracking_orientation_culculate(current_x, current_y, qw, qz);
+        // }
         
         cmd_pub_->publish(new_cmd);
     }
@@ -208,7 +215,6 @@ private:
             new_cmd.linear.z = altitude_controller(target_altitude_, current_z);
             if (new_cmd.linear.z == 0.0) {
                 is_on_altitude_ = true;
-                start_control_alt = true;
                 std_msgs::msg::Bool msg;
                 msg.data = true;
                 set_altitude_done_pub_->publish(msg);

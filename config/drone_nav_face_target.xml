@@ -1,0 +1,44 @@
+<!--
+  NavigateToPose 行為樹（face_target 版）。
+  與 drone_nav.xml 相同，只在 ComputePathToPose 之後插入 SmoothPath，
+  用 face_target 平滑器把每個路徑點的 yaw 改寫成面向 /tracking_center（或面向終點）。
+  SmoothPath 寫回同一個 {path}，接著交給 FollowPath (MPPI)。
+  FollowWaypoints 會對每個 waypoint 各跑一次本樹，所以每一段航程都會各自重算朝向。
+-->
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <RecoveryNode number_of_retries="1" name="NavigateRecovery">
+      <PipelineSequence name="NavigateWithReplanning">
+        <RateController hz="2.0">
+          <RecoveryNode number_of_retries="1" name="ComputePathToPose">
+            <Sequence>
+              <Fallback>
+                <ReactiveSequence>
+                  <Inverter><PathExpiringTimer seconds="10" path="{path}"/></Inverter>
+                  <Inverter><GlobalUpdatedGoal/></Inverter>
+                  <IsPathValid path="{path}"/>
+                </ReactiveSequence>
+                <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
+              </Fallback>
+              <SmoothPath unsmoothed_path="{path}" smoothed_path="{path}"
+                          smoother_id="face_target" check_for_collisions="false"/>
+            </Sequence>
+            <ClearEntireCostmap name="ClearGlobalCostmap-Context" service_name="global_costmap/clear_entirely_global_costmap"/>
+          </RecoveryNode>
+        </RateController>
+        <RecoveryNode number_of_retries="1" name="FollowPath">
+          <FollowPath path="{path}" controller_id="FollowPath"/>
+          <ClearEntireCostmap name="ClearLocalCostmap-Context" service_name="local_costmap/clear_entirely_local_costmap"/>
+        </RecoveryNode>
+      </PipelineSequence>
+      <RoundRobin name="RecoveryActions">
+        <Sequence name="ClearingActions">
+          <ClearEntireCostmap name="ClearLocalCostmap-Subtree" service_name="local_costmap/clear_entirely_local_costmap"/>
+        </Sequence>
+        <Sequence name="ClearingGlobalActions">
+          <ClearEntireCostmap name="ClearGlobalCostmap-Subtree" service_name="global_costmap/clear_entirely_global_costmap"/>
+        </Sequence>
+      </RoundRobin>
+    </RecoveryNode>
+  </BehaviorTree>
+</root>

@@ -65,8 +65,20 @@ ament_target_dependencies(precision_landing_lifecycle
 
 add_executable(fast_lio_lifecycle_wrapper src/fast_lio_lifecycle_wrapper.cpp)
 ament_target_dependencies(fast_lio_lifecycle_wrapper
-  rclcpp 
-  rclcpp_lifecycle 
+  rclcpp
+  rclcpp_lifecycle
+)
+
+add_executable(zed_camera_lifecycle src/zed_camera_lifecycle.cpp)
+ament_target_dependencies(zed_camera_lifecycle
+  rclcpp
+  rclcpp_lifecycle
+)
+
+add_executable(livox_lifecycle src/livox_lifecycle.cpp)
+ament_target_dependencies(livox_lifecycle
+  rclcpp
+  rclcpp_lifecycle
 )
 
 add_executable(rosbag_lifecycle src/rosbag_lifecycle.cpp)
@@ -108,6 +120,8 @@ install(TARGETS
   cmd_vel_bridge
   precision_landing_lifecycle
   fast_lio_lifecycle_wrapper
+  zed_camera_lifecycle
+  livox_lifecycle
   rosbag_lifecycle
   fastlio_to_mavros_only_pose
   DESTINATION lib/${PROJECT_NAME}

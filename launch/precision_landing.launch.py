@@ -33,7 +33,7 @@ def generate_launch_description():
                     package='aruco_ros',
                     executable='marker_publisher', 
                     parameters=[{
-                        'marker_size': 0.03,  # cm
+                        'marker_size': 0.1,  # m
                         'reference_frame': 'camera',
                         'camera_frame': 'camera',
                     }],
