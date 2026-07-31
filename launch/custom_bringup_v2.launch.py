@@ -7,9 +7,9 @@ from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
     unico_pack_path = get_package_share_directory('unico_pack')
-    default_params_file = os.path.join(unico_pack_path, 'config', 'custom_bringup_v6.yaml')
+    default_params_file = os.path.join(unico_pack_path, 'config', 'mppi_orientation_control.yaml')
     default_map_file = os.path.join(unico_pack_path, 'maps', 'warehouse_2d_map.yaml')
-    default_xml_file = os.path.join(unico_pack_path, 'config', 'drone_nav.xml')
+    default_xml_file = os.path.join(unico_pack_path, 'config', 'drone_nav_face_target.xml')
 
     params_file = LaunchConfiguration('params_file')
     use_sim_time = LaunchConfiguration('use_sim_time')
@@ -242,7 +242,7 @@ def generate_launch_description():
     
 
     return LaunchDescription([
-        declare_params, declare_sim, declare_map, declare_user,
+        declare_params, declare_sim, declare_map, declare_user, declare_bt_xml,
         declare_map_odom_tf_x, declare_map_odom_tf_y, declare_map_odom_tf_z,
         declare_map_odom_tf_yaw,
     ] + nodes + [lifecycle_manager])

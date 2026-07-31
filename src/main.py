@@ -241,6 +241,7 @@ class ManagementNode(Node):
             self.ready_receive_mqtt = True
             self.current_status = 'idle'
             self.get_logger().info("Manager is now ready to accept tasks.")
+            self.nas_mount_set()
 
     # ------------------------------------------------------------------ #
     #  MQTT                                                              #
