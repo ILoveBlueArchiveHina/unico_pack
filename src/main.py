@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import rclpy
+import math
 import threading
 import time
 import shutil
@@ -27,7 +28,7 @@ from rcl_interfaces.srv import SetParameters
 from rcl_interfaces.msg import Parameter, ParameterValue, ParameterType
 
 
-LOW_BATTERY_THRESHOLD = 0.5
+LOW_BATTERY_THRESHOLD = 50
 RETURN_HOME_ALT = 3.0
 INSPECTION_ALT = 1.5
 BASE_ALT = 2.0
@@ -185,7 +186,12 @@ class ManagementNode(Node):
         self._gp_origin_set = True
 
     def battery_callback(self, msg):
-        self.battery_percentage = msg.percentage
+        # MAVROS reports percentage as 0.0~1.0; publish it as an integer 0~100.
+        # An unknown level comes in as NaN, which must not reach round().
+        if math.isnan(msg.percentage):
+            self.battery_percentage = None
+        else:
+            self.battery_percentage = round(msg.percentage * 100)
     
     # ------------------------------------------------------------------ #
     #  State helpers                                                       #
@@ -298,9 +304,14 @@ class ManagementNode(Node):
                 x_raw = float(area_coords[i])
                 y_raw = float(area_coords[i + 1])
 
-                # Coordinate transform (1900x1000 to 1482x728)
-                wp_msg.x = round(((x_raw - 100) * 0.866 + 4) * 0.05, 2)
-                wp_msg.y = round(-((y_raw - 100) * 0.89125 + 10) * 0.05, 2)
+                # Coordinate transform (1900x1000 to 1482x728).
+                # The pgm is rotated 180 degrees against the upstream drawing:
+                # both put their origin top-left, but the drawing's top-left
+                # corner is the pgm's bottom-right one. So mirror the point about
+                # the centre of the drivable area (100,100)~(1800,900) — i.e.
+                # measure x from 1800 and y from 900 — before scaling.
+                wp_msg.x = round(((1800 - x_raw) * 0.866 + 4) * 0.05, 2)
+                wp_msg.y = round(-((900 - y_raw) * 0.89125 + 10) * 0.05, 2)
                 ros_msg.waypoints.append(wp_msg)
 
             self.task_queue.append(ros_msg)
