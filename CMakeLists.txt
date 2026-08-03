@@ -134,8 +134,7 @@ install (
 
 execute_process(
   COMMAND chmod +x
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/mission_dispatcher_v2.py
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/main.py
+    ${CMAKE_CURRENT_SOURCE_DIR}/scripts/manual_excute.sh
 )
 
 install(

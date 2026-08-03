@@ -14,14 +14,14 @@ def generate_launch_description():
                 'home_pose_x': 2.0,
                 'home_pose_y': -2.05,
                 'rosbag_folder_path': '/home/uni-co-jetson/rosbag',
-                'mqtt_broker': '192.168.166.83',
+                'mqtt_broker': '192.168.166.83',  # 倉庫mqtt broker, 若只是測試可以使用 'broker.emqx.io' 不須內網的公開broker
                 'nas_mount_path': '/mnt/data'
             }],
             prefix=['taskset -c 1,2,3']
         ),
 
         TimerAction(
-        period = 3.0,
+        period = 2.0,
         actions = [
             Node(
             package='unico_pack',
@@ -36,7 +36,7 @@ def generate_launch_description():
         
 
         TimerAction(
-        period = 6.0,
+        period = 4.0,
         actions = [
             Node(
                 package='unico_pack',
@@ -49,27 +49,4 @@ def generate_launch_description():
                 prefix=['taskset -c 1,2,3']
             )]
         ),
-
-        Node(
-            package='unico_pack',
-            executable='precision_landing_lifecycle',
-            parameters=[{
-                'use_sim_time': False,
-            }],
-            prefix = ['taskset -c 1,2,3']
-        ),
-
-        # Node(
-        #     package='unico_pack',
-        #     executable='fast_lio_lifecycle_wrapper',
-        #     prefix = ['taskset -c 4,5']
-        # ),
-
-        Node(
-            package='unico_pack',
-            executable='rosbag_lifecycle',
-            prefix = ['taskset -c 1,2,3']
-        ),
-
-        
     ])
