@@ -63,6 +63,11 @@ public:
         return LifecycleNodeInterface::CallbackReturn::SUCCESS;
     }
 
+public:
+    // Ctrl+C 時 lifecycle 的 shutdown transition 不會被觸發，
+    // 由 main() 在 spin 結束後主動呼叫，避免 setsid 的子行程變孤兒。
+    void shutdown_child() { stop_process(); }
+
 private:
     pid_t child_pid_;
     rclcpp::TimerBase::SharedPtr configure_timer_;
@@ -112,6 +117,7 @@ int main(int argc, char ** argv) {
     rclcpp::init(argc, argv);
     auto node = std::make_shared<LivoxLifecycleWrapper>();
     rclcpp::spin(node->get_node_base_interface());
+    node->shutdown_child();   // spin 因 SIGINT 返回後，主動收掉 setsid 的子行程，避免孤兒
     rclcpp::shutdown();
     return 0;
 }

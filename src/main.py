@@ -924,7 +924,7 @@ class ManagementNode(Node):
         def _activate_livox():
             self._lifecycle_transition(
                 self.livox_lifecycle, Transition.TRANSITION_ACTIVATE, "Livox-driver",
-                done_cb=lambda success: self._delay_call(delay, _activate_fastlio) if success else self._abort_flight_sequence()
+                done_cb=lambda success: self._delay_call(delay, _activate_nav2) if success else self._abort_flight_sequence()
             )
 
         def _activate_zed():
