@@ -14,7 +14,7 @@ def generate_launch_description():
                 'home_pose_x': 2.0,
                 'home_pose_y': -2.05,
                 'rosbag_folder_path': '/home/uni-co-jetson/rosbag',
-                'mqtt_broker': '192.168.166.83',  # 倉庫mqtt broker, 若只是測試可以使用 'broker.emqx.io' 不須內網的公開broker
+                'mqtt_broker': 'broker.emqx.io',  # 倉庫mqtt broker：192.168.166.83, 若只是測試可以使用 'broker.emqx.io' 不須內網的公開broker
                 'nas_mount_path': '/mnt/data'
             }],
             prefix=['taskset -c 1,2,3']

@@ -247,7 +247,12 @@ class ManagementNode(Node):
             self.ready_receive_mqtt = True
             self.current_status = 'idle'
             self.get_logger().info("Manager is now ready to accept tasks.")
-            self.nas_mount_set()
+
+            threading.Thread(
+                target=self.nas_mount_set,
+                daemon=True
+            ).start()
+        
 
     # ------------------------------------------------------------------ #
     #  MQTT                                                              #
@@ -378,7 +383,6 @@ class ManagementNode(Node):
         """One-shot-style poll: retry set_gp_origin every 3 s, abort after 15 s total."""
         self._gp_origin_retry_count += 1
         
-
         if self._gp_origin_set:
             self._gp_origin_retry_timer.destroy()
             self.get_logger().info("EKF origin confirmed. Continuing flight sequence.")
@@ -483,6 +487,7 @@ class ManagementNode(Node):
         future.add_done_callback(_call_mode_response)
 
     def _abort_flight_sequence(self):
+        self.get_logger().error("Aborting task.")
         self.send_cancelled_task_list(self._get_remaining_tasks_list())
         self.is_processing = True
         self.current_status = 'error'
@@ -863,7 +868,7 @@ class ManagementNode(Node):
 
         self.is_processing = False
 
-    def nas_mount_set(self, retries=5, delay=2.0):
+    def nas_mount_set(self, retries=3, delay=2.0):
         # /mnt/data 在 /etc/fstab 設為 x-systemd.automount：
         # 必須「存取掛載點內部」才會觸發 systemd 自動掛 NFS（不需要 sudo/密碼）。
         # os.path.ismount() 只看 autofs 佔位層，無法確認 NFS 真的掛好，故改用實際存取驗證。
@@ -928,12 +933,12 @@ class ManagementNode(Node):
                 done_cb=lambda success: self._delay_call(delay, _activate_livox) if success else self._abort_flight_sequence()
             )
 
-        # if self.use_sim_time:
-        #     _activate_nav2()
-        #     return
+        if self.use_sim_time:
+            _activate_nav2()
+            return
 
-        # _activate_zed()
-        _activate_nav2()
+        _activate_zed()
+        # _activate_nav2()
         
 
     def deactivate_system(self):
@@ -961,13 +966,13 @@ class ManagementNode(Node):
             done_cb=lambda success: self._delay_call(delay, _deactivate_fastlio)
             )
 
-        # if self.use_sim_time:
-        #     self._nav2_lifecycle(ManageLifecycleNodes.Request.RESET, "Nav2")
-        #     return
+        if self.use_sim_time:
+            self._nav2_lifecycle(ManageLifecycleNodes.Request.RESET, "Nav2")
+            return
 
-        # _deactivate_nav2()
+        _deactivate_nav2()
 
-        self._nav2_lifecycle(ManageLifecycleNodes.Request.RESET, "Nav2")
+        # self._nav2_lifecycle(ManageLifecycleNodes.Request.RESET, "Nav2")
 
 
 def main(args=None):
