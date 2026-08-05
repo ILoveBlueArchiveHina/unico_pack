@@ -78,15 +78,15 @@ private:
     const double Ki_yaw = 0.05;
 
     // I 項只在誤差落在此帶寬內才累積，避免大誤差/遠距離移動時 windup
-    const double INTEGRAL_BAND_XY = 0.10;   // m
+    const double INTEGRAL_BAND_XY = 0.15;   // m
     const double INTEGRAL_BAND_YAW = 2.0;   // deg
     const double I_MAX_XY = 0.15;           // m/s, Ki*integral 貢獻上限
     const double I_MAX_YAW = 0.15;          // rad/s, Ki*integral 貢獻上限
     const double CONTROL_DT = 0.1;          // 對應 100ms timer
 
-    const double ALIGNMENT_THRESHOLD_XY = 0.05;
-    const double ALIGNMENT_THRESHOLD_YAW = 1.0;
-    const double ALIGNMENT_HOLD_TIME = 0.5;
+    const double ALIGNMENT_THRESHOLD_XY = 0.08;
+    const double ALIGNMENT_THRESHOLD_YAW = 3.0;
+    const double ALIGNMENT_HOLD_TIME = 0.3;
     
     // 狀態變數
     std::map<int, MarkerData> detected_markers_;
