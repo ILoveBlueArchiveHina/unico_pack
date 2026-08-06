@@ -35,7 +35,7 @@ public:
         timer_ = this->create_wall_timer(
             50ms, std::bind(&CopterVelocityControlFixed::send_velocity, this));
             
-        RCLCPP_INFO(this->get_logger(), "速度控制節點已啟動（C++ 修正版）");
+        RCLCPP_INFO(this->get_logger(), "速度控制節點已啟動");
         RCLCPP_INFO(this->get_logger(), "節點運行中...");
         RCLCPP_INFO(this->get_logger(), "請先：1) 切換GUIDED模式  2) 解鎖  3) 起飛");
         RCLCPP_INFO(this->get_logger(), "然後發送cmd_vel命令");

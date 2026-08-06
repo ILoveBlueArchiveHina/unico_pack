@@ -84,8 +84,8 @@ class ManagementNode(Node):
 
         # ROS2 Lifecycle client
         self.precision_landing_lifecycle = self.create_client(ChangeState, '/precision_landing_lifecycle/change_state')   # lifecycle節點名稱有誤導致切換狀態總是失敗(已修復2026-07-04)
-        self.rosbag_lifecycle_client = self.create_client(ChangeState, '/rosbag_node/change_state')
-        self.rosbag_lifecycle_param = self.create_client(SetParameters, '/rosbag_node/set_parameters')
+        self.rosbag_lifecycle_client = self.create_client(ChangeState, '/rosbag_lifecycle/change_state')
+        self.rosbag_lifecycle_param = self.create_client(SetParameters, '/rosbag_lifecycle/set_parameters')
         self.fast_lio_lifecycle = self.create_client(ChangeState, '/fastlio_wrapper/change_state')
         self.zed_lifecycle = self.create_client(ChangeState, '/zed_camera_lifecycle/change_state')
         self.livox_lifecycle = self.create_client(ChangeState, '/livox_lifecycle/change_state')
@@ -767,7 +767,7 @@ class ManagementNode(Node):
             signal_msg.data = True
             self.start_control_alt_pub.publish(signal_msg)
             msg = Float64()
-            msg.data = -0.2  # 為了確實降落到地面而使用負數
+            msg.data = -0.2  # 為了確實降落到地面
             self.set_flight_altitude_pub.publish(msg)
             return
 
@@ -814,6 +814,7 @@ class ManagementNode(Node):
     # ------------------------------------------------------------------ #
 
     def _lifecycle_transition(self, client, transition_id, label, done_cb=None):
+        """ 用來啟動單一 Lifecycle 節點，是否啟動成功會由done_cb回傳結果 """
         if not client.service_is_ready():
             self.get_logger().error(f"{label} change_state service not available.")
             if done_cb:
@@ -836,6 +837,7 @@ class ManagementNode(Node):
         future.add_done_callback(_on_done)
 
     def _nav2_lifecycle(self, command, label, done_cb=None):
+        """ 用來管理 Nav2 運轉與待機 """
         if not self.nav2_lifecycle.service_is_ready():
             self.get_logger().error(f"{label} manage_nodes service not available.")
             if done_cb:
@@ -858,6 +860,7 @@ class ManagementNode(Node):
         future.add_done_callback(_on_done)
 
     def record_rosbag(self, action="on", path="default"):
+        """ 用來錄製 rosbag 和設定檔案路徑 """
         transition_id = {
             "on":  Transition.TRANSITION_ACTIVATE,
             "off": Transition.TRANSITION_DEACTIVATE,
@@ -884,6 +887,8 @@ class ManagementNode(Node):
             if not self.rosbag_lifecycle_param.service_is_ready():
                 self.get_logger().error("rosbag_node set_parameters service not available.")
                 return
+
+            # 把 rosbag 儲存路徑用參數寫入 rosbag_lifecycle
             param = Parameter()
             param.name = "output_path"
             param.value = ParameterValue(type=ParameterType.PARAMETER_STRING, string_value=output_path)
@@ -899,8 +904,9 @@ class ManagementNode(Node):
             self._lifecycle_transition(self.rosbag_lifecycle_client, transition_id, f"Rosbag({path})")
 
     def _upload_rosbag_to_nas(self, complite_task_list):
+        """ 將已經完成的任務的 rosbag 上傳到 NAS """
         for task in complite_task_list:
-            rel_dir = task.rosbag_path        # 已是 YYYY-MM-DD/YYYY-MM-DD-HH-MM_TaskID
+            rel_dir = task.rosbag_path        # YYYY-MM-DD/YYYY-MM-DD-HH-MM_TaskID
             src = f"{self.rosbag_folder_path}/{rel_dir}"
             dst = f"{self.nas_mount_path}/{rel_dir}"
 
@@ -914,12 +920,13 @@ class ManagementNode(Node):
                 # if not self.use_sim_time:
                 #     os.makedirs(os.path.dirname(dst), exist_ok=True)
                 #     shutil.copytree(src, dst)
-                os.makedirs(os.path.dirname(dst), exist_ok=True)
-                shutil.copytree(src, dst, dirs_exist_ok=True)
-
+                
+                os.makedirs(os.path.dirname(dst), exist_ok=True)    # 先在掛載點(/mnt/data)建一個資料夾 YYYY-MM-DD ，如果已經存在就跳過
+                shutil.copytree(src, dst, dirs_exist_ok=True)   # 將檔案複製到掛載點，等於上傳到NAS上
+                # 複製完成才會往下走
                 self.get_logger().info(f"Rosbag uploaded: {task.task_id}")
                 self.send_feedback(task_id=task.task_id, result=1, failed_faces=[])
-            except Exception as e:
+            except Exception as e:  # 複製過程若因錯誤碼而中斷一律當作上傳失敗
                 self.get_logger().error(f"Rosbag upload failed: {e}")
                 self.send_feedback(task_id=task.task_id, result=3, failed_faces=[])
 
@@ -951,12 +958,17 @@ class ManagementNode(Node):
         return False
 
     def _delay_call(self, delay, callback):
+        """ 延遲觸發用的function """
         def _activate():
             timer.destroy()
             callback()
         timer = self.create_timer(delay, _activate)
 
     def activate_system(self):
+        """ 將巡檢需要用到的功能(Lifecycle節點)從待機狀態喚醒，
+            利用 self._lifecycle_transition 的 done_cb 可以判斷是否成功，
+            一步一步將各個功能喚醒，若失敗則放棄任務，等待故障排除。
+        """
         delay = 3.0
 
         def _nav2_activated_callback(success):
@@ -999,6 +1011,7 @@ class ManagementNode(Node):
         
 
     def deactivate_system(self):
+        """ 將待機需要休眠的功能(Lifecycle節點)從運轉狀態切換成待機 """
         delay = 2.0
         self.system_activated = False
         

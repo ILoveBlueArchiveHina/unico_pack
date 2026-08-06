@@ -47,7 +47,7 @@ def generate_launch_description():
                 # 多標記降落控制節點
                 Node(
                     package='unico_pack',
-                    executable='multi_marker_landing_node',
+                    executable='precision_landing',
                     prefix=['taskset -c 1,2,3'],
                 ),
             ]

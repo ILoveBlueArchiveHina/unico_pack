@@ -90,7 +90,6 @@ class Nav2Executor(Node):
         self._is_task_cancelled = False
 
     def listener_callback(self, msg):
-        """Receive task from MQTT Bridge and call Nav2"""
         self.get_logger().info(f"Received Task ID: {msg.task_id} with {len(msg.waypoints)} points")
         self.task_id = msg.task_id
 

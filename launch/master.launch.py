@@ -27,7 +27,7 @@ def generate_launch_description():
         manager_launch,
         Node(
            package='unico_pack',
-           executable='fastlio_to_mavros_only_pose',
+           executable='odom_to_pose',
            prefix = ['taskset -c 1,2,3']
         ),
     ]

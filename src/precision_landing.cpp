@@ -36,7 +36,7 @@ struct CenterData {
 
 class MultiMarkerLanding : public rclcpp::Node {
 public:
-    MultiMarkerLanding() : Node("multi_marker_landing_cpp") {
+    MultiMarkerLanding() : Node("precision_landing") {
         // 參數初始化
         // MARKER_IDS = {10, 20, 30, 440};
         // INNER_MARKER_IDS = {550};

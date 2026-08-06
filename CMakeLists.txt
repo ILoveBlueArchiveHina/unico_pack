@@ -24,24 +24,14 @@ find_package(campus_delivery_msgs REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(rclcpp_action REQUIRED)
 
-add_executable(multi_marker_landing_node src/multi_marker_landing_v2.cpp)
-ament_target_dependencies(multi_marker_landing_node 
+add_executable(precision_landing src/precision_landing.cpp)
+ament_target_dependencies(precision_landing
   rclcpp 
   geometry_msgs 
   sensor_msgs 
   nav_msgs 
   mavros_msgs 
   aruco_msgs 
-  std_msgs 
-  tf2 
-  tf2_ros
-)
-
-add_executable(nav_velocity_tracker src/nav_velocity_tracker.cpp)
-ament_target_dependencies(nav_velocity_tracker
-  rclcpp 
-  nav2_msgs
-  geometry_msgs 
   std_msgs 
   tf2 
   tf2_ros
@@ -87,16 +77,6 @@ ament_target_dependencies(rosbag_lifecycle
   rclcpp_lifecycle
 )
 
-add_executable(mission_dispatcher_v3 src/mission_dispatcher_v3.cpp)
-ament_target_dependencies(mission_dispatcher_v3
-  rclcpp
-  rclcpp_action
-  geometry_msgs
-  std_msgs
-  nav2_msgs
-  campus_delivery_msgs
-)
-
 add_executable(cmd_vel_bridge src/cmd_vel_bridge.cpp)
 ament_target_dependencies(cmd_vel_bridge
   rclcpp
@@ -105,25 +85,23 @@ ament_target_dependencies(cmd_vel_bridge
   std_msgs
 )
 
-add_executable(fastlio_to_mavros_only_pose src/fastlio_to_mavros_only_pose.cpp)
-ament_target_dependencies(fastlio_to_mavros_only_pose
+add_executable(odom_to_pose src/odom_to_pose.cpp)
+ament_target_dependencies(odom_to_pose
   rclcpp
   nav_msgs
   geometry_msgs
 )
 
 install(TARGETS
-  multi_marker_landing_node
-  nav_velocity_tracker
+  precision_landing
   velocity_controller
-  mission_dispatcher_v3
   cmd_vel_bridge
   precision_landing_lifecycle
   fast_lio_lifecycle_wrapper
   zed_camera_lifecycle
   livox_lifecycle
   rosbag_lifecycle
-  fastlio_to_mavros_only_pose
+  odom_to_pose
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -139,8 +117,7 @@ execute_process(
 
 install(
   PROGRAMS
-  src/mission_dispatcher_v2.py
-  src/mission_dispatcher_v4.py
+  src/mission_dispatcher.py
   src/main.py
   DESTINATION lib/${PROJECT_NAME}
 )

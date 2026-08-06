@@ -25,7 +25,7 @@ def generate_launch_description():
         actions = [
             Node(
             package='unico_pack',
-            executable='mission_dispatcher_v4.py',
+            executable='mission_dispatcher.py',
             parameters=[{
                 'tracking_mode': True,
             }],

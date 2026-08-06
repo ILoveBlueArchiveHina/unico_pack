@@ -8,7 +8,7 @@
 class FastLioVisionBridge : public rclcpp::Node
 {
 public:
-  FastLioVisionBridge() : Node("fastlio_vision_bridge"), msg_count_(0)
+  FastLioVisionBridge() : Node("odom_to_pose"), msg_count_(0)
   {
     declare_parameter("fastlio_odom_topic", "/Odometry");
     declare_parameter("mavros_vision_pose_topic", "/mavros/vision_pose/pose_cov");

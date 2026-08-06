@@ -10,7 +10,7 @@ using rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface;
 
 class RosbagLifecycle : public rclcpp_lifecycle::LifecycleNode {
 public:
-    RosbagLifecycle() : rclcpp_lifecycle::LifecycleNode("rosbag_node"), child_pid_(-1) {
+    RosbagLifecycle() : rclcpp_lifecycle::LifecycleNode("rosbag_lifecycle"), child_pid_(-1) {
         declare_parameter<std::string>("output_path", "/home/uni-co-jetson/rosbag");
         declare_parameter<std::vector<std::string>>("topics", {
             "/zed/zed_node/left/color/rect/camera_info",
