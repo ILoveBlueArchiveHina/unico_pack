@@ -35,11 +35,11 @@ BASE_ALT = 2.0
 SAFE_ZONE_X = 15.0
 SAFE_ZONE_Y = -6.0
 
-TAKEOFF_ALT_ODOM = 1.0  # 機體座標往上1.0公尺，而不是絕對高度
+TAKEOFF_ALT_ODOM = 1.0  # 機體座標往上1.0公尺，不是絕對高度
 
-LOW_BATTERY_THRESHOLD = 50
-PROCESS_STATE_INSPECTION = "INSPECTION"
-PROCESS_STATE_RETURN_HOME = "RETURN_HOME"
+LOW_BATTERY_THRESHOLD = 50                  # 電量低於這個值觸發返航充電行為
+PROCESS_STATE_INSPECTION = "INSPECTION"     # 進程狀態：巡檢
+PROCESS_STATE_RETURN_HOME = "RETURN_HOME"   # 進程狀態：返航
 
 class ManagementNode(Node):
     def __init__(self):
@@ -65,24 +65,24 @@ class ManagementNode(Node):
         self.nas_mount_path = self.get_parameter("nas_mount_path").value
 
         # ROS2 topics (publisher)
-        self.task_publisher_ = self.create_publisher(NavTask, "navigation_tasks", 1)
-        self.start_vel_bridge_signal_pub = self.create_publisher(Bool, 'start_vel_bridging', 1)
-        self.start_control_alt_pub = self.create_publisher(Bool, 'start_alt_control', 1)
-        self.cancel_current_task_pub = self.create_publisher(Bool, "cancel_navigation", 1)
-        self.set_flight_altitude_pub = self.create_publisher(Float64, "set_flight_altitude", 1)
+        self.task_publisher_ = self.create_publisher(NavTask, "/navigation_tasks", 1)               # 發給 mission_dispatcher 的任務
+        self.cancel_current_task_pub = self.create_publisher(Bool, "/cancel_navigation", 1)         # 告訴 mission_dispatcher 取消目前任務
+        self.start_vel_bridge_signal_pub = self.create_publisher(Bool, '/start_vel_bridging', 1)    # 告訴 cmd_vel_bridge 可以開始橋接命令的訊號
+        self.start_control_alt_pub = self.create_publisher(Bool, '/start_alt_control', 1)           # 告訴 velocity_controller 可以開始控制高度的訊號
+        self.set_flight_altitude_pub = self.create_publisher(Float64, "/set_flight_altitude", 1)    # 告訴 velocity_controller 目標高度值(單位:公尺)
         self._gp_origin_pub = self.create_publisher(
-            GeoPointStamped, '/mavros/global_position/set_gp_origin', 1)  # Setting EKF origin
+            GeoPointStamped, '/mavros/global_position/set_gp_origin', 1)                            # 設置 mavros EKF原點位置
 
         # ROS2 topics (subscriber)
-        self.create_subscription(NavResult, 'navigation_result', self.result_callback, 1)
-        self.create_subscription(ExtendedState, '/mavros/extended_state', self.mavros_extended_state_callback, 1)
-        self.create_subscription(State, '/mavros/state', self.mavros_state_callback, 1)
-        self.create_subscription(Bool, 'ready_to_record_rosbag', self.ready_to_record_rosbag_signal_sub, 1)
-        self.create_subscription(Bool, 'set_flight_alt_done', self.set_flight_altitude_callback, 1)
-        self.create_subscription(BatteryState, '/mavros/battery', self.battery_callback, qos_profile_sensor_data)
-        self.create_subscription(GeoPointStamped, '/mavros/global_position/gp_origin', self._gp_origin_callback, 1)
+        self.create_subscription(NavResult, '/navigation_result', self.result_callback, 1)                          # 接收 mission_dispatcher 回傳的結果
+        self.create_subscription(ExtendedState, '/mavros/extended_state', self.mavros_extended_state_callback, 1)   # 監聽 mavros 的擴展狀態訊息(為了監控飛機是否落地)
+        self.create_subscription(State, '/mavros/state', self.mavros_state_callback, 1)                             # 監控 mavros 是否有連線
+        self.create_subscription(Bool, '/ready_to_record_rosbag', self.ready_to_record_rosbag_signal_sub, 1)        # 接收 mission_dispather 到達巡檢區域後的訊號(表示可以錄製rosbag)
+        self.create_subscription(Bool, '/set_flight_alt_done', self.set_flight_altitude_callback, 1)                # 接收 velocity_controller 回傳高度調整完成的訊號
+        self.create_subscription(BatteryState, '/mavros/battery', self.battery_callback, qos_profile_sensor_data)   # 監控 mavros 回傳的飛機電量
+        self.create_subscription(GeoPointStamped, '/mavros/global_position/gp_origin', self._gp_origin_callback, 1) # 監控 mavros 回傳的EKF原點訊息(用來判斷EKF原點是否設置成功)
 
-        # ROS2 Lifecycle client
+        # ROS2 Lifecycle client (用來管理各功能的運轉與關閉)
         self.precision_landing_lifecycle = self.create_client(ChangeState, '/precision_landing_lifecycle/change_state')   # lifecycle節點名稱有誤導致切換狀態總是失敗(已修復2026-07-04)
         self.rosbag_lifecycle_client = self.create_client(ChangeState, '/rosbag_lifecycle/change_state')
         self.rosbag_lifecycle_param = self.create_client(SetParameters, '/rosbag_lifecycle/set_parameters')
@@ -91,18 +91,19 @@ class ManagementNode(Node):
         self.livox_lifecycle = self.create_client(ChangeState, '/livox_lifecycle/change_state')
 
         # Nav2 Client
-        self.nav_to_pose_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
-        self.nav2_lifecycle = self.create_client(ManageLifecycleNodes, '/lifecycle_manager_navigation/manage_nodes')
+        self.nav_to_pose_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')    # Nav2主要用來導航的功能
+        self.nav2_lifecycle = self.create_client(ManageLifecycleNodes, '/lifecycle_manager_navigation/manage_nodes')    # 管理Nav2的運轉與待機
 
         # mavros client
-        self.mavros_takeoff_client = self.create_client(CommandTOL, '/mavros/cmd/takeoff')
-        self.mavros_arm_client = self.create_client(CommandBool, '/mavros/cmd/arming')
-        self.mavros_mode_client = self.create_client(SetMode, '/mavros/set_mode')
-        self.mavros_message_client = self.create_client(MessageInterval, '/mavros/set_message_interval')
+        self.mavros_takeoff_client = self.create_client(CommandTOL, '/mavros/cmd/takeoff')                  # 起飛 service
+        self.mavros_arm_client = self.create_client(CommandBool, '/mavros/cmd/arming')                      # 解鎖/上鎖 service
+        self.mavros_mode_client = self.create_client(SetMode, '/mavros/set_mode')                           # 設置模式 service
+        self.mavros_message_client = self.create_client(MessageInterval, '/mavros/set_message_interval')    # 請求發送目標訊息 service
 
         # Timer
-        self.create_timer(5.0, self._status_report)
-        self.set_ready_timer_ = self.create_timer(5.0, self._set_ready)
+        self.create_timer(5.0, self._status_report)                     # 定期向MQTT回報狀態的計時器
+        self.set_ready_timer_ = self.create_timer(5.0, self._set_ready) # MQTT剛連上，過一段時間等待穩定
+    
 
         # Intialize variables
         self.task_queue = []
@@ -165,11 +166,13 @@ class ManagementNode(Node):
         self._fly_to_safe_zone(PROCESS_STATE_RETURN_HOME)
 
     def _cancel_current_task(self):
+        """發布取消導航的訊息"""
         msg = Bool()
         msg.data = True
         self.cancel_current_task_pub.publish(msg)
 
     def _get_remaining_tasks_list(self):
+        """取得剩餘還沒完成的任務列表"""
         remaining_task_ids = [task.task_id for task in self.task_queue]
         if self.is_processing and self.current_task:
             remaining_task_ids.insert(0, self.current_task.task_id)
@@ -207,6 +210,7 @@ class ManagementNode(Node):
         return self.mavros_extended_state.landed_state == ExtendedState.LANDED_STATE_IN_AIR
 
     def _wait_for_landed(self, poll_interval=1.0):
+        """ 以固定頻率檢查飛機是否落地，落地後才執行後續流程 """
         while self._is_in_air():
             time.sleep(poll_interval)
 
@@ -224,16 +228,18 @@ class ManagementNode(Node):
         self._lifecycle_transition(
             self.precision_landing_lifecycle, Transition.TRANSITION_DEACTIVATE, "PrecisionLanding")
 
-        threading.Thread(
+        threading.Thread(                       # 開額外執行序，避免上傳過程卡住主程式
             target=self._upload_rosbag_to_nas,
             args=(self.complite_task_list,),
             daemon=True
         ).start()
+
         self.complite_task_list = []
-        self.deactivate_system()
+        self.deactivate_system()    # 降落後只需要留必要功能，剩下的可以休眠
         
         
     def _require_extended_data(self, id):
+        """ 向 mavros 請求發送訊息，某些訊息mavros是不會主動發布的"""
         if not self.mavros_message_client.service_is_ready():
             self.get_logger().error("set_message_interval service not available.")
             return
@@ -257,6 +263,7 @@ class ManagementNode(Node):
             ).start()
         
     def _abort_flight_sequence(self):
+        """ 當執行到該function就代表飛機出現需要手動排除的故障"""
         self.get_logger().error("Aborting task.")
         self.send_cancelled_task_list(self._get_remaining_tasks_list())
         self.is_processing = True
@@ -474,12 +481,12 @@ class ManagementNode(Node):
             4. 以固定頻率檢查飛機是否離地，離地後飛往安全調整高度
             5. 若上述任何一項失敗則放棄任務並回報error
         """
+        # 第一步：設置GUIDED模式
         req = SetMode.Request()
         req.custom_mode = 'GUIDED'
         future = self.mavros_mode_client.call_async(req)
 
-
-        def _call_mode_response(future):
+        def _call_mode_response(future):    # 模式設置是否成功會在這裡收到
             try:
                 if not future.result().mode_sent:
                     self.get_logger().error("SetMode GUIDED failed. Aborting task.")
@@ -497,12 +504,13 @@ class ManagementNode(Node):
                 self._abort_flight_sequence()
                 return
 
+            # 下一步：解鎖
             req = CommandBool.Request()
             req.value = True
             future = self.mavros_arm_client.call_async(req)
             future.add_done_callback(_call_armed_response)
 
-        def _call_armed_response(future):
+        def _call_armed_response(future):   # 解鎖設置是否成功會在這裡收到
             try:
                 if not future.result().success:
                     self.get_logger().error("Arming failed. Aborting task.")
@@ -520,6 +528,7 @@ class ManagementNode(Node):
                 self._abort_flight_sequence()
                 return
 
+            # 下一步：起飛
             req = CommandTOL.Request()
             req.altitude = float(self._takeoff_altitude)
             req.min_pitch = 0.0
@@ -529,7 +538,7 @@ class ManagementNode(Node):
             future = self.mavros_takeoff_client.call_async(req)
             future.add_done_callback(_call_takeoff_response)
 
-        def _call_takeoff_response(future):
+        def _call_takeoff_response(future): # 起飛是否成功會在這裡收到
             try:
                 if not future.result().success:
                     self.get_logger().error("Takeoff command rejected. Aborting task.")
@@ -542,7 +551,7 @@ class ManagementNode(Node):
 
             self.get_logger().info("Takeoff command accepted. Waiting for altitude...")
             self._takeoff_poll_count = 0
-            self._takeoff_poll_timer = self.create_timer(1, _poll_altitude)
+            self._takeoff_poll_timer = self.create_timer(1, _poll_altitude) # 定期檢查飛機是否已經離地
 
         def _poll_altitude():
             """One-shot poll: cancel timer once airborne or timed out (20 s)."""
@@ -551,7 +560,10 @@ class ManagementNode(Node):
             if self._is_in_air():
                 self._takeoff_poll_timer.destroy()
                 self.get_logger().info("Drone airborne. Executing task.")
+
+                # 下一步：飛到安全區調高度
                 self._fly_to_safe_zone(PROCESS_STATE_INSPECTION)
+
             elif self._takeoff_poll_count >= 20:
                 self._takeoff_poll_timer.destroy()
                 self.get_logger().error("Timed out waiting for takeoff. Aborting task.")
@@ -576,7 +588,7 @@ class ManagementNode(Node):
         self.is_processing = True
         self.process_state = process_state
 
-        # 發送速度命令橋接訊號，告訴橋接器可以開始橋接
+        # 發送速度命令橋接訊號，告訴橋接節點可以開始橋接
         # 必須在起飛完成後才能橋接速度命令，否則起飛動作將被打斷
         # 導致無法起飛
         bridge_signal_ = Bool()
@@ -757,6 +769,10 @@ class ManagementNode(Node):
         future.add_done_callback(_home_response_callback)
 
     def force_landing(self):
+        """ 強制降落用，無法正常降落之情況會使用到
+            主要利用飛控的LAND模式進行降落
+            降落動作完全交由飛控的安全機制處理
+        """
         if not self._is_in_air():
             self.get_logger().info("Drone already on ground.")
             return
@@ -922,7 +938,7 @@ class ManagementNode(Node):
                 #     shutil.copytree(src, dst)
                 
                 os.makedirs(os.path.dirname(dst), exist_ok=True)    # 先在掛載點(/mnt/data)建一個資料夾 YYYY-MM-DD ，如果已經存在就跳過
-                shutil.copytree(src, dst, dirs_exist_ok=True)   # 將檔案複製到掛載點，等於上傳到NAS上
+                shutil.copytree(src, dst, dirs_exist_ok=True)       # 將檔案複製到掛載點，等於上傳到NAS上
                 # 複製完成才會往下走
                 self.get_logger().info(f"Rosbag uploaded: {task.task_id}")
                 self.send_feedback(task_id=task.task_id, result=1, failed_faces=[])
