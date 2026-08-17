@@ -1,3 +1,4 @@
+""" 主要用來啟動導航相關的 Navigation2 節點，與官方提供的bringup 不同，這裡只使用必要的nav2節點 """
 import os
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, TimerAction
@@ -70,7 +71,7 @@ def generate_launch_description():
 
 
     nodes = [
-        Node(
+        Node(           # 地圖原點與Fast-LIO原點座標轉換
             package='tf2_ros',
             executable='static_transform_publisher',
             name='static_tf_map',

@@ -1,4 +1,38 @@
 #!/usr/bin/env python3
+"""倉儲巡檢無人機的總指揮節點（node name: process_manager）。
+
+整個系統的最上層狀態機，負責四件事：
+  1. MQTT 與 ROS 2 之間的橋接（對外唯一窗口）
+  2. 飛行流程編排（起飛 → 巡檢 → 返航 → 降落）
+  3. Lifecycle 節點的喚醒與休眠（待機時省電、降低算力負載）
+  4. rosbag 的錄製與完成後上傳 NAS
+
+MQTT 介面
+  訂閱 warehouse/task/request      巡檢任務（單筆或陣列），area 為四角點像素座標
+       warehouse/task/notification 中止通知（"suspend"），通常不會用到
+  發布 warehouse/task/status       每 5 秒回報 status 與電量
+       warehouse/task/feedback     0=任務成立 1=rosbag上傳成功 2=導航失敗 3=上傳失敗
+       warehouse/task/cancelled    中止時回報尚未完成的 task_id
+
+正常任務流程
+  1. 收到任務 → 座標轉換（僑泰任務圖與導航 pgm 相差 180 度，需鏡射後縮放）
+     → 存入 task_queue，新任務排隊，不打斷進行中的任務
+  2. 系統若在待機，依序喚醒 ZED → Livox → FAST-LIO → Nav2，任一失敗即放棄任務
+  3. 若尚未起飛：確認 EKF 原點 → GUIDED → arm → takeoff → 輪詢確認離地
+  4. 飛往安全區（走道，無障礙物）再調整高度至巡檢高度 1.5 m
+  5. 發 NavTask 給 mission_dispatcher，收到 ready_to_record_rosbag 就開始錄製
+  6. 收到 NavResult → 停止錄製 → 回報 MQTT → 取下一個任務
+  7. 佇列清空 → 升到返航高度 3.0 m → 飛回 HOME → 精準降落 → 上鎖
+     → 背景執行緒上傳 rosbag 至 NAS → 讓各 Lifecycle 節點休眠
+
+異常處理
+  電量低於 50%     清空佇列、取消當前任務、立刻返航
+  起飛前置失敗     _abort_flight_sequence()，狀態轉 error，需人工排除
+  Nav2 無回應      force_landing()，交由飛控 LAND 模式降落
+
+流程幾乎全以 callback chain 串接（非阻塞），只有等待落地與上傳 rosbag
+另開執行緒；MQTT 由 paho 自己的背景執行緒處理。
+"""
 import rclpy
 import math
 import threading
@@ -41,9 +75,9 @@ LOW_BATTERY_THRESHOLD = 50                  # 電量低於這個值觸發返航�
 PROCESS_STATE_INSPECTION = "INSPECTION"     # 進程狀態：巡檢
 PROCESS_STATE_RETURN_HOME = "RETURN_HOME"   # 進程狀態：返航
 
-class ManagementNode(Node):
+class ProcessManager(Node):
     def __init__(self):
-        super().__init__('process_manager')
+        super().__init__('process_manager')  # 節點名稱
 
         # declare parameters (input values are for simulation; otherwise, default values will be used in actual test)
         # 宣告參數（若為 SITL 則使用外部輸入，否則使用預設值來實際測試）
@@ -100,11 +134,6 @@ class ManagementNode(Node):
         self.mavros_mode_client = self.create_client(SetMode, '/mavros/set_mode')                           # 設置模式 service
         self.mavros_message_client = self.create_client(MessageInterval, '/mavros/set_message_interval')    # 請求發送目標訊息 service
 
-        # Timer
-        self.create_timer(5.0, self._status_report)                     # 定期向MQTT回報狀態的計時器
-        self.set_ready_timer_ = self.create_timer(5.0, self._set_ready) # MQTT剛連上，過一段時間等待穩定
-    
-
         # Intialize variables
         self.task_queue = []
         self.complite_task_list = []
@@ -137,6 +166,10 @@ class ManagementNode(Node):
         self.status_mqtt_topic = "warehouse/task/status"
         self.feedback_mqtt_topic = "warehouse/task/feedback"
 
+        # Timer
+        self.create_timer(5.0, self._status_report)                     # 定期向MQTT回報狀態的計時器
+        self.set_ready_timer_ = self.create_timer(3.0, self._set_ready) # MQTT剛連上，過一段時間等待穩定
+
         # MQTT client
         self.client = mqtt.Client()
         self.client.on_connect = self.on_connect
@@ -166,7 +199,7 @@ class ManagementNode(Node):
         self._fly_to_safe_zone(PROCESS_STATE_RETURN_HOME)
 
     def _cancel_current_task(self):
-        """發布取消導航的訊息"""
+        """發布取消導航的訊息給 mission_dispatcher"""
         msg = Bool()
         msg.data = True
         self.cancel_current_task_pub.publish(msg)
@@ -804,7 +837,7 @@ class ManagementNode(Node):
     # ------------------------------------------------------------------ #
     #  Notifications & termination                                         #
     # ------------------------------------------------------------------ #
-    """ 用來中止任務的，通常不會用到，因為需要MQTT發布對應訊息 """
+    """ MQTT通知中止任務，通常不會用到 """
     def handle_notification(self, data):
         notification = data.get("notification", "")
         self.get_logger().info(f"Received Notification: {notification}")
@@ -819,8 +852,7 @@ class ManagementNode(Node):
         cancelled_ids = self._get_remaining_tasks_list()
 
         self.task_queue.clear()
-        # Note: mission_dispatcher's active Nav2 goal is NOT cancelled here.
-        # A future improvement is to publish a cancel signal to mission_dispatcher.
+        self._cancel_current_task()
 
         self.send_cancelled_task_list(cancelled_ids)
         self._fly_to_safe_zone(PROCESS_STATE_RETURN_HOME)
@@ -1023,7 +1055,12 @@ class ManagementNode(Node):
             _activate_nav2()
             return
 
-        _activate_zed()
+        _activate_nav2()    # 一般測試的話則只要喚醒nav2就好，因為其他功能開啟時就在運作，
+        # _activate_zed()   # 如果是正式測試流程的話請先喚醒zed，
+                            # 因為會使用master.launch.py開啟所有節點，
+                            # 此時各節點都在休眠，因此會需要將所有節點喚醒，
+                            # 而一般測試時大部分功能開啟時就已經在運作，
+                            # 因此只需要喚醒 Nav2就好。
         
 
     def deactivate_system(self):
@@ -1055,15 +1092,16 @@ class ManagementNode(Node):
         if self.use_sim_time:
             self._nav2_lifecycle(ManageLifecycleNodes.Request.RESET, "Nav2")
             return
+        
+        self._nav2_lifecycle(ManageLifecycleNodes.Request.RESET, "Nav2")    # 一般測試時使用這行
+        # _deactivate_nav2()    # 正式流程測時則使用這行
 
-        _deactivate_nav2()
-
-        # self._nav2_lifecycle(ManageLifecycleNodes.Request.RESET, "Nav2")
+        
 
 
 def main(args=None):
     rclpy.init(args=args)
-    node = ManagementNode()
+    node = ProcessManager()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

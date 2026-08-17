@@ -118,7 +118,7 @@ execute_process(
 install(
   PROGRAMS
   src/mission_dispatcher.py
-  src/main.py
+  src/process_manager.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

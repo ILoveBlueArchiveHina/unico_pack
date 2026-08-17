@@ -8,19 +8,15 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     unico_pack = get_package_share_directory('unico_pack')
-    # livox_ros_driver2 = get_package_share_directory('livox_ros_driver2')
     
     mavros_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(unico_pack, 'launch', 'mavros.launch.py')))
-
-    # livox_driver_launch = IncludeLaunchDescription(
-    #     PythonLaunchDescriptionSource(os.path.join(livox_ros_driver2, 'launch_ROS2', 'msg_MID360_launch.py')))
 
     manager_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(unico_pack, 'launch', 'manager_system_bringup.launch.py')))
 
     nav_bringup_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(os.path.join(unico_pack, 'launch', 'custom_bringup_v2.launch.py')))
+        PythonLaunchDescriptionSource(os.path.join(unico_pack, 'launch', 'nav2_bringup.launch.py')))
 
     first_launch = [
         mavros_launch,

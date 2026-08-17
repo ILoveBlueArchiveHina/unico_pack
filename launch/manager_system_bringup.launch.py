@@ -8,7 +8,7 @@ def generate_launch_description():
     return LaunchDescription([
         Node(
             package='unico_pack',
-            executable='main.py',
+            executable='process_manager.py',
             output='screen',
             parameters=[{
                 'home_pose_x': 2.0,
