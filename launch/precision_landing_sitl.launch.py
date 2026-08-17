@@ -9,12 +9,12 @@ def generate_launch_description():
             executable='marker_publisher', 
             parameters=[{
                 'marker_size': 0.1,  # cm
-                'reference_frame': 'camera',
-                'camera_frame': 'camera',
+                'reference_frame': 'landing_camera',
+                'camera_frame': 'landing_camera',
             }],
             remappings=[
-                ('camera_info', 'webcam/camera_info'),
-                ('image', 'webcam/image_raw')
+                ('camera_info', 'landing_camera/camera_info'),
+                ('image', 'landing_camera/image_raw')
             ]
         ),
         

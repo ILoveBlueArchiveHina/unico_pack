@@ -103,6 +103,25 @@ def generate_launch_description():
                 '--child-frame-id', 'zed_camera_link']
         ),
 
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='static_tf_camera',
+            # 降落相機：機體後方 5cm、下方 20cm，光軸朝正下方、影像上方對著機頭。
+            # landing_camera 為光學座標系（REP 145：z 出鏡頭、x 影像右、y 影像下），
+            # 等價 RPY = (0, pi, pi/2)（rad）；此處用四元數避免歐拉角單位誤用。
+            arguments=[
+                '--x', '-0.05',
+                '--y', '0.0',
+                '--z', '-0.2',
+                '--qx', '-0.70710678',
+                '--qy', '0.70710678',
+                '--qz', '0.0',
+                '--qw', '0.0',
+                '--frame-id', 'body',
+                '--child-frame-id', 'landing_camera']
+        ),
+
         TimerAction(
             period=0.0,
             actions=[

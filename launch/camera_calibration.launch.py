@@ -14,12 +14,12 @@ def generate_launch_description():
                 'image_height': 720,
                 'pixel_format': 'mjpeg2rgb',
                 'framerate': 10.0,
-                'frame_id': "camera",
-                'camera_name': 'webcam'
+                'frame_id': "landing_camera",
+                'camera_name': 'landing_camera'
             }],
             remappings=[
-                ('image_raw', 'webcam/image_raw'),
-                ('camera_info', 'webcam/camera_info')
+                ('image_raw', 'landing_camera/image_raw'),
+                ('camera_info', 'landing_camera/camera_info')
             ]
         ),
 
@@ -28,10 +28,10 @@ def generate_launch_description():
             executable="cameracalibrator",
             arguments=['--size', '7x9', '--square', '0.02'],
             remappings=[
-                ('image', '/webcam/image_raw'),
+                ('image', '/landing_camera/image_raw'),
             ],
             parameters=[{
-                'camera': '/webcam',
+                'camera': '/landing_camera',
             }]
         )
         

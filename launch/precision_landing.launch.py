@@ -15,7 +15,7 @@ def generate_launch_description():
                 'pixel_format': 'mjpeg2rgb',
                 'framerate': 10.0,
                 'camera_info_url': 'file:///home/uni-co-jetson/ros2_ws/src/unico_pack/config/arducam_fisheye.yaml',
-                'frame_id': "camera",
+                'frame_id': "landing_camera",
                 'camera_name': 'landing_cam'
             }],
             remappings=[
@@ -34,8 +34,8 @@ def generate_launch_description():
                     executable='marker_publisher', 
                     parameters=[{
                         'marker_size': 0.1,  # m
-                        'reference_frame': 'camera',
-                        'camera_frame': 'camera',
+                        'reference_frame': 'landing_camera',
+                        'camera_frame': 'landing_camera',
                     }],
                     remappings=[
                         ('camera_info', 'landing_cam/camera_info'),
