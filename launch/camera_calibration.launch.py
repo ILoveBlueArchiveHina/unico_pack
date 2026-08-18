@@ -8,10 +8,10 @@ def generate_launch_description():
         Node(
             package='usb_cam',
             executable='usb_cam_node_exe',
-            parameters=[{
+            parameters=[{       # 參數根據相機可支援規格調整
                 'video_device': '/dev/video0',
-                'image_width': 1280,
-                'image_height': 720,
+                'image_width': 1280,        
+                'image_height': 720,        
                 'pixel_format': 'mjpeg2rgb',
                 'framerate': 10.0,
                 'frame_id': "landing_camera",

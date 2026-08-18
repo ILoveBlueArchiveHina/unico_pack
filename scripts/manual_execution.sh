@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# manual_excute.sh
+# manual_execution.sh
 set -e
 source /opt/ros/humble/setup.bash
 source /home/uni-co-jetson/livox_ws/install/setup.bash

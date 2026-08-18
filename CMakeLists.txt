@@ -112,7 +112,7 @@ install (
 
 execute_process(
   COMMAND chmod +x
-    ${CMAKE_CURRENT_SOURCE_DIR}/scripts/manual_excute.sh
+    ${CMAKE_CURRENT_SOURCE_DIR}/scripts/manual_execution.sh
 )
 
 install(
