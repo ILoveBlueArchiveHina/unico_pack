@@ -24,15 +24,14 @@ def generate_launch_description():
         period = 2.0,
         actions = [
             Node(
-            package='unico_pack',
-            executable='mission_dispatcher.py',
-            parameters=[{
-                'tracking_mode': True,
-            }],
-            output='screen',
-            prefix=['taskset -c 1,2,3']
-            )]
-        ),
+                package='unico_pack',
+                executable='mission_dispatcher.py',
+                parameters=[{
+                    'tracking_mode': True,
+                }],
+                output='screen',
+                prefix=['taskset -c 1,2,3']
+            )]),
         
 
         TimerAction(
@@ -47,6 +46,19 @@ def generate_launch_description():
                 package='unico_pack',
                 executable='velocity_controller',
                 prefix=['taskset -c 1,2,3']
+            ),
+            Node(
+                package='unico_pack',
+                executable='rosbag_lifecycle',
+                prefix = ['taskset -c 1,2,3']
+            ),
+            Node(
+                package='unico_pack',
+                executable='precision_landing_lifecycle',
+                parameters=[{
+                    'use_sim_time': False,
+                }],
+                prefix = ['taskset -c 1,2,3']
             )]
         ),
     ])

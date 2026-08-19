@@ -30,30 +30,7 @@ def generate_launch_description():
 
     lifecycle_nodes = [
         TimerAction(
-            period=6.0,
-            actions=[
-                Node(
-                    package='unico_pack',
-                    executable='rosbag_lifecycle',
-                    prefix = ['taskset -c 1,2,3']
-                )
-            ]
-        ),
-        TimerAction(
             period=8.0,
-            actions=[
-                Node(
-                    package='unico_pack',
-                    executable='precision_landing_lifecycle',
-                    parameters=[{
-                        'use_sim_time': False,
-                    }],
-                    prefix = ['taskset -c 1,2,3']
-                )
-            ]
-        ),
-        TimerAction(
-            period=10.0,
             actions=[
                 Node(
                     package='unico_pack',
@@ -63,7 +40,7 @@ def generate_launch_description():
             ]
        ),
         TimerAction(
-            period=12.0,
+            period=10.0,
             actions=[
                 Node(
                     package='unico_pack',
@@ -73,7 +50,7 @@ def generate_launch_description():
             ]
         ),
         TimerAction(
-            period=14.0,
+            period=12.0,
             actions=[
                 Node(
                     package='unico_pack',
@@ -90,7 +67,7 @@ def generate_launch_description():
         *first_launch,
         *lifecycle_nodes,
         TimerAction(
-            period=16.0,
+            period=14.0,
             actions=[
                 nav_bringup_launch
             ]

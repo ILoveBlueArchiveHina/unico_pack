@@ -1055,6 +1055,7 @@ class ProcessManager(Node):
             _activate_nav2()
             return
 
+        # 以下這兩行程式根據不同測試流程把其中一個註解掉
         _activate_nav2()    # 一般測試的話則只要喚醒nav2就好，因為其他功能開啟時就在運作，
         # _activate_zed()   # 如果是正式測試流程的話請先喚醒zed，
                             # 因為會使用master.launch.py開啟所有節點，
@@ -1093,6 +1094,7 @@ class ProcessManager(Node):
             self._nav2_lifecycle(ManageLifecycleNodes.Request.RESET, "Nav2")
             return
         
+        # 以下這兩行程式根據不同測試流程把其中一個註解掉
         self._nav2_lifecycle(ManageLifecycleNodes.Request.RESET, "Nav2")    # 一般測試時使用這行
         # _deactivate_nav2()    # 正式流程測時則使用這行
 
