@@ -80,7 +80,7 @@ source ~/ros2_ws/install/setup.bash
 # ==============================================================================
 echo ""
 echo "[Step 1] Starting MAVROS..."
-taskset -c 4,5 ros2 launch kuo_pack mavros.launch.py &
+taskset -c 4,5 ros2 launch unico_pack mavros.launch.py &
 sleep 5
 
 # ==============================================================================
@@ -164,7 +164,7 @@ fi
 # ==============================================================================
 echo ""
 echo "[Step 4] Starting Vision Bridge..."
-taskset -c 3 ros2 launch kuo_pack fastlio_vision.launch.py &
+taskset -c 3 ros2 run unico_pack odom_to_pose &
 sleep 2
 
 # ==============================================================================
