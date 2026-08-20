@@ -1,3 +1,7 @@
+<!--
+  NavigateToPose 行為樹（無航向控制版本）。
+  不會呼叫smoother改寫航向，若有需要使用到舊版控制方式才會用到該檔案（不然基本上用不到）。
+-->
 <root main_tree_to_execute="MainTree">
   <BehaviorTree ID="MainTree">
     <RecoveryNode number_of_retries="1" name="NavigateRecovery">

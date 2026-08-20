@@ -119,6 +119,7 @@ install(
   PROGRAMS
   src/mission_dispatcher.py
   src/process_manager.py
+  scripts/lidar_gpio.py   # livox_lifecycle 會用 ros2 run 啟動它來控制光達電源
   DESTINATION lib/${PROJECT_NAME}
 )
 

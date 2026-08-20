@@ -37,8 +37,6 @@ def generate_launch_description():
         default_value=default_map_file
     )
 
-    # NavigateToPose 行為樹。預設 drone_nav.xml（DWB 流程）；
-    # 要用航向控制時傳 bt_xml:=<config>/drone_nav_face_target.xml
     declare_bt_xml = DeclareLaunchArgument(
         'bt_xml',
         default_value=default_xml_file
