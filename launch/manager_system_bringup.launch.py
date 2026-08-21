@@ -1,11 +1,17 @@
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch.actions import IncludeLaunchDescription, TimerAction
+from launch.actions import IncludeLaunchDescription, TimerAction, DeclareLaunchArgument
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
 
 def generate_launch_description():
-    
+    test_mode = LaunchConfiguration('test_mode')
+    declare_test_mode = DeclareLaunchArgument(
+        'test_mode',
+        default_value='true'
+    )
     return LaunchDescription([
+        declare_test_mode,
         Node(
             package='unico_pack',
             executable='process_manager.py',
@@ -15,7 +21,8 @@ def generate_launch_description():
                 'home_pose_y': -2.05,
                 'rosbag_folder_path': '/home/uni-co-jetson/rosbag',
                 'mqtt_broker': '192.168.166.83',  # 倉庫mqtt broker：192.168.166.83, 若只是測試可以使用 'broker.emqx.io' 不須內網的公開broker
-                'nas_mount_path': '/mnt/data'
+                'nas_mount_path': '/mnt/data',
+                'test_mode': test_mode
             }],
             prefix=['taskset -c 1,2,3']
         ),

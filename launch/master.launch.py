@@ -13,7 +13,10 @@ def generate_launch_description():
         PythonLaunchDescriptionSource(os.path.join(unico_pack, 'launch', 'mavros.launch.py')))
 
     manager_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(os.path.join(unico_pack, 'launch', 'manager_system_bringup.launch.py')))
+        PythonLaunchDescriptionSource(os.path.join(unico_pack, 'launch', 'manager_system_bringup.launch.py')),
+        launch_arguments={
+            'test_mode': 'false'
+        }.items())
 
     nav_bringup_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(unico_pack, 'launch', 'nav2_bringup.launch.py')))

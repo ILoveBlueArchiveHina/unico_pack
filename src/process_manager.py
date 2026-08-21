@@ -88,6 +88,7 @@ class ProcessManager(Node):
         self.declare_parameter("safe_zone_x", SAFE_ZONE_X)
         self.declare_parameter("safe_zone_y", SAFE_ZONE_Y)
         self.declare_parameter("nas_mount_path", "/mnt/data")
+        self.declare_parameter("test_mode", True)
         
         self.home_pose_x = self.get_parameter("home_pose_x").value
         self.home_pose_y = self.get_parameter("home_pose_y").value
@@ -97,6 +98,7 @@ class ProcessManager(Node):
         self.safe_zone_y = self.get_parameter("safe_zone_y").value
         self.use_sim_time = self.get_parameter("use_sim_time").value
         self.nas_mount_path = self.get_parameter("nas_mount_path").value
+        self.test_mode = self.get_parameter("test_mode").value
 
         # ROS2 topics (publisher)
         self.task_publisher_ = self.create_publisher(NavTask, "/navigation_tasks", 1)               # 發給 mission_dispatcher 的任務
@@ -178,6 +180,10 @@ class ProcessManager(Node):
         # Bound the built-in reconnect backoff (default is up to 120s) so a
         # dropped connection doesn't sit idle too long before retrying.
         self.client.reconnect_delay_set(min_delay=1, max_delay=30)
+        if self.test_mode:
+            self.get_logger().info("test_mode:=true")
+        else:
+            self.get_logger().info("test_mode:=false")
 
         try:
             # connect_async() does not block or raise if the broker is
@@ -1055,13 +1061,13 @@ class ProcessManager(Node):
             _activate_nav2()
             return
 
-        # 以下這兩行程式根據不同測試流程把其中一個註解掉
-        _activate_nav2()    # 一般測試的話則只要喚醒nav2就好，因為其他功能開啟時就在運作，
-        # _activate_zed()   # 如果是正式測試流程的話請先喚醒zed，
-                            # 因為會使用master.launch.py開啟所有節點，
-                            # 此時各節點都在休眠，因此會需要將所有節點喚醒，
-                            # 而一般測試時大部分功能開啟時就已經在運作，
-                            # 因此只需要喚醒 Nav2就好。
+        if self.test_mode:
+            _activate_nav2()    # 一般測試的話則只要喚醒nav2就好，因為其他功能開啟時就在運作，
+        else:                   # 如果是正式測試流程的話先喚醒zed，
+            _activate_zed()     # 因為會使用master.launch.py開啟所有節點，
+                                # 此時各節點都在休眠，因此會需要將所有節點喚醒，
+                                # 而一般測試時大部分功能開啟時就已經在運作，
+                                # 因此只需要喚醒 Nav2就好。
         
 
     def deactivate_system(self):
@@ -1095,8 +1101,10 @@ class ProcessManager(Node):
             return
         
         # 以下這兩行程式根據不同測試流程把其中一個註解掉
-        self._nav2_lifecycle(ManageLifecycleNodes.Request.RESET, "Nav2")    # 一般測試時使用這行
-        # _deactivate_nav2()    # 正式流程測時則使用這行
+        if self.test_mode:
+            self._nav2_lifecycle(ManageLifecycleNodes.Request.RESET, "Nav2")    # 一般測試時使用這行
+        else:
+            _deactivate_nav2()    # 正式流程測時則使用這行
 
         
 
